@@ -6,12 +6,16 @@ import { fuzzy } from '../search.js';
 import { fmtShort } from '../dates.js';
 import { app, applyLook } from '../app.js';
 import { TEMPLATE_ICONS } from './sidebar.js';
+import { newBoard } from './board.js';
 
 function commands() {
   const out = [
     { label: 'New note', icon: 'file-plus', key: 'Alt+N', run: () => app.newNote('Blank') },
     { label: 'New note in a folder, or on another day…', icon: 'folder-input', run: () => app.newNoteDialog() },
     { label: 'Today’s note', icon: 'calendar-days', run: () => app.today() },
+    { label: 'All the lists', icon: 'layout-grid', key: 'Alt+L', run: () => app.navigate('#/lists') },
+    { label: 'Tags: people and topics', icon: 'at-sign', run: () => app.navigate('#/tags') },
+    { label: 'New board', icon: 'square-kanban', run: () => newBoard() },
     { label: 'Search all notes', icon: 'search', key: 'Ctrl+Shift+F', run: () => app.navigate('#/search/') },
     { label: 'Calendar', icon: 'calendar', key: 'Alt+C', run: () => app.navigate('#/calendar/') },
     { label: 'Settings', icon: 'settings', run: () => app.settings() },
@@ -19,12 +23,16 @@ function commands() {
     { label: 'Dark or light', icon: 'moon', run: () => ((S.device.theme = document.documentElement.dataset.theme === 'dark' ? 'light' : 'dark'), S.saveDevice(), applyLook()) },
     { label: 'Keyboard shortcuts', icon: 'keyboard', run: () => app.settings('keys') }
   ];
-  for (const l of S.shared.lists) out.splice(3, 0, { label: `List: ${l.name}`, icon: 'list-checks', key: l.id === (S.shared.lists[0] || {}).id ? 'Alt+L' : '', run: () => app.navigate('#/list/' + encodeURIComponent(l.id)) });
+  for (const l of S.shared.lists) out.splice(4, 0, { label: `List: ${l.name}`, icon: 'list-checks', run: () => app.navigate('#/list/' + encodeURIComponent(l.id)) });
+  for (const b of lib.boards) out.push({ label: `Board: ${b.name}`, icon: 'square-kanban', run: () => app.navigate(app.boardHash(b)) });
+  // (people come after notes with the same name: weak)
+  for (const p of lib.people().slice(0, 60)) out.push({ label: `Tag: ${p.replace(/_/g, ' ')}`, icon: 'at-sign', weak: true, run: () => app.navigate(app.tagHash('@' + p.toLowerCase())) });
   for (const t of lib.templates) out.push({ label: `New: ${t.name}`, icon: TEMPLATE_ICONS[t.name.toLowerCase()] || 'file-text', run: () => (t.name.toLowerCase() === 'daily note' ? app.today() : app.newNote(t.name)) });
   if (app.view && app.view.kind === 'note') {
     const v = app.view;
     out.push(
-      { label: 'This note: write or read', icon: 'book-open', key: 'Ctrl+E', run: () => v.setMode(v.mode === 'write' ? 'read' : 'write') },
+      { label: 'This note: write or read', icon: 'book-open', key: 'Ctrl+E', run: () => v.setMode(v.mode === 'read' ? 'write' : 'read') },
+      { label: 'This note: as a mind map', icon: 'network', run: () => v.setMode('map') },
       { label: 'This note: dictate', icon: 'mic', key: 'F9', run: () => v.dictate() },
       { label: 'This note: the AI', icon: 'sparkles', run: () => v.toggleAI() },
       { label: 'This note: copy as formatted text', icon: 'copy', run: () => v.copyFormatted() },
@@ -48,12 +56,12 @@ export function openPalette() {
   };
   const update = () => {
     const q = input.value;
-    const cmds = commands().map((c) => ({ c, s: fuzzy(c.label, q) * (q ? 1 : 0.5) })).filter((x) => x.s > 0);
+    const cmds = commands().map((c) => ({ c, s: fuzzy(c.label, q) * (q ? 1 : 0.5) })).filter((x) => x.s > 0 && (q || !x.c.weak));
     const notes = lib.all({ archived: true }).map((n) => ({ n, s: q ? Math.max(fuzzy(n.title, q), fuzzy(n.name, q) * 0.9) : 1 })).filter((x) => x.s > 0);
     if (!q) {
       items = cmds.slice(0, 6).map((x) => ({ type: 'cmd', ...x })).concat(notes.slice(0, 12).map((x) => ({ type: 'note', ...x })));
     } else {
-      const all = cmds.map((x) => ({ type: 'cmd', ...x, s: x.s + 5 })).concat(notes.map((x) => ({ type: 'note', ...x })));
+      const all = cmds.map((x) => ({ type: 'cmd', ...x, s: x.s + (x.c.weak ? -10 : 5) })).concat(notes.map((x) => ({ type: 'note', ...x })));
       all.sort((a, b) => b.s - a.s);
       items = all.slice(0, 40);
       if (q.trim()) items.push({ type: 'search', q });

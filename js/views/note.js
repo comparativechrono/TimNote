@@ -20,6 +20,8 @@ import { splitPath, joinPath, fileName, freeName, cleanTitle, cleanFolder, decod
 import { app } from '../app.js';
 import { AiPanel } from './aipanel.js';
 import { toICS } from '../ics.js';
+import { MapCanvas, mapFile } from '../canvas.js';
+import { noteTree, treeLayout } from '../mapdata.js';
 
 /** a title from the first line of a note that wasn't given one */
 function firstLine(text) {
@@ -50,6 +52,7 @@ export class NoteView {
     this.saveSoon = debounce(() => this.save(), 900);
     this.footSoon = debounce(() => this.renderFoot(), 300);
     this.readSoon = debounce(() => this.renderReader(), 250);
+    this.mapSoon = debounce(() => this.renderMap(), 300);
 
     let text = '', startAt = cursor;
     if (draft) {
@@ -133,6 +136,7 @@ export class NoteView {
 
     this.writeTab = h('button.seg', { type: 'button', 'aria-pressed': 'true', onclick: () => this.setMode('write') }, iconEl('pencil'), h('span', 'Write'));
     this.readTab = h('button.seg', { type: 'button', 'aria-pressed': 'false', onclick: () => this.setMode('read') }, iconEl('book-open'), h('span', 'Read'));
+    this.mapTab = h('button.seg', { type: 'button', 'aria-pressed': 'false', title: 'The note as a mind map (the note isn’t changed)', onclick: () => this.setMode('map') }, iconEl('network'), h('span', 'Map'));
     this.micBtn = iconBtn('mic', `Dictate (F9)`, () => this.dictate(), 'mic');
     this.aiBtn = h('button.btn.ai-btn', { type: 'button', title: 'Ask the AI to tidy, summarise or find the actions', onclick: () => this.toggleAI() }, iconEl('sparkles'), h('span', 'AI'));
     const more = iconBtn('ellipsis', 'More', () => this.moreMenu(more));
@@ -143,7 +147,7 @@ export class NoteView {
       burger,
       this.dateBtn,
       h('div.titlebox', this.titleEl, h('div.note-meta', this.pathBtn, this.statusEl)),
-      h('div.note-tools', h('div.segs', { role: 'group', 'aria-label': 'Write or read' }, this.writeTab, this.readTab), this.micBtn, this.aiBtn, more)
+      h('div.note-tools', h('div.segs', { role: 'group', 'aria-label': 'Write, read or see as a mind map' }, this.writeTab, this.readTab, this.mapTab), this.micBtn, this.aiBtn, more)
     );
     this.banner = h('div.note-banner', { hidden: true });
     this.editorHost = h('div.editor-host');
@@ -157,7 +161,8 @@ export class NoteView {
         this.ed.goToLine(+b.dataset.line);
       }
     });
-    this.body = h('div.note-body', this.editorHost, this.reader);
+    this.mapHost = h('div.map-host', { hidden: true });
+    this.body = h('div.note-body', this.editorHost, this.reader, this.mapHost);
     this.foot = h('footer.note-foot');
     this.el = h('section.note-view', this.head, this.banner, this.body, this.foot);
 
@@ -192,6 +197,7 @@ export class NoteView {
         this.ed.refresh();
         this.footSoon();
         if (this.mode === 'read') this.readSoon();
+        if (this.mode === 'map') this.mapSoon();
       }),
       on('disk', (d) => d.changed.includes(this.path) && this.checkDisk()),
       on('reconnected', () => this.dirty && this.save()),
@@ -326,7 +332,8 @@ export class NoteView {
       const count = l.done ? c.open : c.open + c.done;
       parts.push(h('a.foot-list', { href: '#/list/' + encodeURIComponent(l.id), title: `Open ${l.name}` }, h(`span.swatch.hl-${l.color || 'yellow'}`), l.name, h('b', String(count)), l.done && c.done ? h('span.foot-done', `${c.done} done`) : null));
     }
-    this.foot.replaceChildren(h('span.foot-words', plural(words, 'word')), ...parts, h('span.grow'), h('span.foot-hint', this.mode === 'read' ? 'Double-click to edit there' : `${keyLabel('Ctrl+Enter')} ticks off a line`));
+    const hint = this.mode === 'read' ? 'Double-click to edit there' : this.mode === 'map' ? 'Double-click a card to edit it there' : `${keyLabel('Ctrl+Enter')} ticks off a line`;
+    this.foot.replaceChildren(h('span.foot-words', plural(words, 'word')), ...parts, h('span.grow'), h('span.foot-hint', hint));
   }
 
   status(kind, extra = '') {
@@ -350,6 +357,7 @@ export class NoteView {
     if (!this.conflict) this.saveSoon();
     this.footSoon();
     if (this.mode === 'read') this.readSoon();
+    if (this.mode === 'map') this.mapSoon();
   }
 
   save({ now = false } = {}) {
@@ -467,6 +475,7 @@ export class NoteView {
         lib.update(this.path, d.text, disk.mtime, disk.size, { eol: d.eol, bom: d.bom });
         this.footSoon();
         if (this.mode === 'read') this.renderReader();
+        if (this.mode === 'map') this.renderMap();
         toast('This note was changed elsewhere (on another computer, perhaps): it shows the new version.', '', 5000);
         return;
       }
@@ -535,6 +544,7 @@ export class NoteView {
       }
       this.footSoon();
       if (this.mode === 'read') this.renderReader();
+      if (this.mode === 'map') this.renderMap();
     } catch (e) {
       toast('That didn’t work: ' + e.message, 'bad', 8000);
       this.showConflict(disk);
@@ -682,6 +692,8 @@ export class NoteView {
       rec.clear(this.recId);
       this.recId = to;
       lib.moved(from, to, r.mtime);
+      this.moveMap(from, to);
+      lib.relinkBoards(from, to).catch(() => {}); // (cards on boards that link to the note follow it)
       if (S.device.lastPath === from) {
         S.device.lastPath = to;
         S.saveDevice();
@@ -738,10 +750,14 @@ export class NoteView {
     this.mode = m;
     this.writeTab.setAttribute('aria-pressed', String(m === 'write'));
     this.readTab.setAttribute('aria-pressed', String(m === 'read'));
-    this.editorHost.hidden = m === 'read';
+    this.mapTab.setAttribute('aria-pressed', String(m === 'map'));
+    this.editorHost.hidden = m !== 'write';
     this.reader.hidden = m !== 'read';
+    this.mapHost.hidden = m !== 'map';
     this.el.classList.toggle('reading', m === 'read');
+    this.el.classList.toggle('mapping', m === 'map');
     if (m === 'read') this.renderReader();
+    else if (m === 'map') this.renderMap();
     else this.ed.focus();
     this.renderFoot();
   }
@@ -767,6 +783,52 @@ export class NoteView {
       }).catch(() => img.replaceWith(h('span.img-missing', `[picture not found: ${img.dataset.src}]`)));
     }
   }
+  /* ---------------- the note as a mind map ---------------- */
+  mapCards() {
+    const tree = noteTree(this.ed.getText(), cleanTitle(this.title) || firstLine(this.ed.getText()) || 'Untitled', S.lists(), this.date);
+    const cards = [];
+    // (each branch from the middle has a colour of its own)
+    const walk = (n, branch) => {
+      const t = n.task;
+      cards.push({ key: n.key, kind: n.kind, text: n.text, line: n.line, task: t, branch, listColour: t ? (S.listById(t.list) || {}).color : null });
+      n.children.forEach((c, i) => walk(c, branch == null ? i : branch));
+    };
+    walk(tree.root, null);
+    return { cards, links: tree.links, layout: (size) => treeLayout(tree.root, size) };
+  }
+  renderMap() {
+    if (this.destroyed || this.mode !== 'map') return;
+    const items = this.mapCards();
+    if (this.map) {
+      if (this.path && this.map.o.key !== 'note:' + this.path) this.map.rekey('note:' + this.path); // (a new note, saved since)
+      return this.map.setItems(items);
+    }
+    this.map = new MapCanvas(
+      Object.assign(items, {
+        key: this.path ? 'note:' + this.path : null,
+        fileName: this.title || 'Mind map',
+        empty: 'Nothing to show yet: write something first. Each paragraph, bullet and line becomes a card.',
+        onOpen: (card) => this.goToLine(card.line),
+        onToggle: (card) => {
+          if (this.needsLoad || this.notUtf8) return toast('This note can’t be changed here.', 'warn');
+          if (this.ed.toggleLine(card.line) === false) toast('That line can’t be ticked off.', 'warn');
+        }
+      })
+    );
+    this.mapHost.replaceChildren(this.map.el);
+    this.map.mount();
+  }
+  /** a note's mind map's layout, moved with it */
+  async moveMap(from, to) {
+    if (this.map) this.map.rekey('note:' + to);
+    try {
+      const a = mapFile('note:' + from);
+      if (await fsx.exists(a)) await fsx.exclusive(a, () => fsx.move(a, mapFile('note:' + to)));
+    } catch (e) {
+      /* (the layout stays where it was: the map starts afresh) */
+    }
+  }
+
   readerClick(e) {
     const mark = e.target.closest('mark.hl[data-line]');
     if (mark) {
@@ -779,9 +841,12 @@ export class NoteView {
     if (a.dataset.wiki) {
       e.preventDefault();
       this.openLink({ wiki: a.dataset.wiki });
+    } else if (a.dataset.person) {
+      e.preventDefault();
+      this.openLink({ person: a.dataset.person });
     } else if (a.dataset.tag) {
       e.preventDefault();
-      app.navigate('#/search/' + encodeURIComponent('#' + a.dataset.tag));
+      this.openLink({ tag: a.dataset.tag.toLowerCase() });
     } else if (a.dataset.path) {
       e.preventDefault();
       this.openLink({ path: a.dataset.path, resolved: true });
@@ -793,6 +858,8 @@ export class NoteView {
   }
   openLink(link) {
     if (link.url) return window.open(link.url, '_blank', 'noopener');
+    if (link.person) return app.navigate(app.tagHash('@' + link.person));
+    if (link.tag) return app.navigate(app.tagHash('#' + link.tag));
     if (link.wiki) {
       const n = lib.byTitle(link.wiki);
       if (n) return app.openNote(n.path);
@@ -855,7 +922,7 @@ export class NoteView {
   /* ---------------- dictation and the AI ---------------- */
   dictate() {
     const target = { insert: (t) => this.ed.insert(t), before: () => this.ed.textBefore(300), isConnected: () => !this.destroyed, focus: () => this.ed.focus() };
-    if (this.mode === 'read') this.setMode('write');
+    if (this.mode !== 'write') this.setMode('write');
     this.ed.focus();
     dict.toggle(target);
   }
@@ -974,6 +1041,7 @@ export class NoteView {
       this.dirty = false;
       rec.clear(this.recId);
       lib.removed(this.path);
+      fsx.remove(mapFile('note:' + this.path)).catch(() => {});
       if (S.device.lastPath === this.path) {
         S.device.lastPath = '';
         S.saveDevice();
@@ -991,7 +1059,7 @@ export class NoteView {
     const mod = e.ctrlKey || e.metaKey;
     if (mod && !e.shiftKey && !e.altKey && e.key.toLowerCase() === 'e') {
       e.preventDefault();
-      this.setMode(this.mode === 'write' ? 'read' : 'write');
+      this.setMode(this.mode === 'read' ? 'write' : 'read');
     } else if (mod && !e.shiftKey && e.key.toLowerCase() === 's') {
       e.preventDefault();
       this.save({ now: true });
@@ -1019,6 +1087,8 @@ export class NoteView {
     this.saveSoon.cancel();
     this.footSoon.cancel();
     this.readSoon.cancel();
+    this.mapSoon.cancel();
+    if (this.map) this.map.destroy();
     clearInterval(this.timer);
     clearTimeout(this.retry);
     document.removeEventListener('keydown', this.onKeys);

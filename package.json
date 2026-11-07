@@ -1,12 +1,12 @@
 {
   "name": "timnote",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "private": true,
   "description": "Notes and to-do lists kept as plain text files in a folder you choose.",
   "type": "module",
   "scripts": {
     "test": "node --test \"test/unit/*.test.mjs\"",
-    "test:e2e": "node test/e2e.mjs && node test/e2e-features.mjs",
+    "test:e2e": "node test/e2e.mjs && node test/e2e-features.mjs && node test/e2e-boards.mjs",
     "start": "node test/serve.mjs",
     "build:vendor": "node build/vendor.mjs",
     "build:icons": "node build/icons.mjs",

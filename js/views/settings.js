@@ -10,7 +10,7 @@ import { cleanFolder, joinPath } from '../notes.js';
 import { app, applyLook, SHORTCUTS } from '../app.js';
 import { TEMPLATE_ICONS } from './sidebar.js';
 
-export const VERSION = '1.0.0';
+export const VERSION = '1.1.0';
 
 const field = (label, control, hint) => h('label.field', h('span.field-label', label), control, hint ? h('span.hint', hint) : null);
 const select = (value, options, onchange) => {
@@ -229,7 +229,8 @@ function lookSection() {
     field('Light or dark', select(d.theme, [['auto', 'As the computer is set'], ['light', 'Light'], ['dark', 'Dark']], (v) => ((d.theme = v), device(), applyLook()))),
     field('Typeface for notes', select(d.font, [['serif', 'Literata (a book face)'], ['sans', 'The computer’s own sans serif'], ['mono', 'Typewriter (monospace)']], (v) => ((d.font = v), device(), applyLook()))),
     field('Text size', select(d.size, [15, 16, 17, 18, 19, 20, 22].map((n) => [n, n + ' px' + (n === 17 ? ' (usual)' : '')]), (v) => ((d.size = +v), device(), applyLook()))),
-    field('Width of the page', select(d.width, [['narrow', 'Narrow'], ['normal', 'Usual'], ['wide', 'Wide'], ['full', 'The whole window']], (v) => ((d.width = v), device(), applyLook())))
+    field('Width of the page', select(d.width, [['narrow', 'Narrow'], ['normal', 'Usual'], ['wide', 'Wide'], ['full', 'The whole window']], (v) => ((d.width = v), device(), applyLook()))),
+    field('TimNote opens on', select(d.home === 'last' ? 'last' : 'lists', [['lists', 'All the lists, side by side'], ['last', 'The note you had open last']], (v) => ((d.home = v), device())), 'On this computer.')
   );
 }
 

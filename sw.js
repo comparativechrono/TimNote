@@ -1,7 +1,7 @@
 /* TimNote's service worker: it keeps the app's files so that TimNote opens without the internet. It always asks
    the network first (so a new version is used at once), and falls back to the kept copy when offline. The notes
    themselves are never here: they are in your folder. Made by build/sw.mjs. */
-const VERSION = '9f1d90d2cf5a';
+const VERSION = '5fa968f6d997';
 const CACHE = 'timnote-' + VERSION;
 const ASSETS = [
   "./",
@@ -11,16 +11,22 @@ const ASSETS = [
   "css/fonts.css",
   "js/ai.js",
   "js/app.js",
+  "js/boards.js",
   "js/bus.js",
+  "js/canvas.js",
   "js/dates.js",
   "js/dictation.js",
+  "js/drag.js",
   "js/editor.js",
   "js/fsx.js",
   "js/ics.js",
   "js/idb.js",
+  "js/inline.js",
   "js/library.js",
   "js/main.js",
+  "js/mapdata.js",
   "js/notes.js",
+  "js/people.js",
   "js/recovery.js",
   "js/render.js",
   "js/search.js",
@@ -29,14 +35,18 @@ const ASSETS = [
   "js/templates.js",
   "js/util.js",
   "js/views/aipanel.js",
+  "js/views/board.js",
   "js/views/calendar.js",
+  "js/views/items.js",
   "js/views/lists.js",
   "js/views/newnote.js",
   "js/views/note.js",
+  "js/views/overview.js",
   "js/views/palette.js",
   "js/views/search.js",
   "js/views/settings.js",
   "js/views/sidebar.js",
+  "js/views/tags.js",
   "js/views/welcome.js",
   "vendor/codemirror.js",
   "vendor/icons.js",

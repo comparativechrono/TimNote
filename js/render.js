@@ -10,6 +10,7 @@ import DOMPurify from '../vendor/purify.js';
 import { esc } from './util.js';
 import * as S from './settings.js';
 import { resolvePath, isMarkdown } from './notes.js';
+import { cleanName, personKey, displayName } from './people.js';
 
 const nl = (s) => (String(s).match(/\n/g) || []).length;
 const dl = (t) => (t._line != null ? ` data-line="${t._line}"` : '');
@@ -43,6 +44,21 @@ md.use({
         if (m) return { type: 'hashtag', raw: m[0], tag: m[1] };
       },
       renderer: (t) => `<a class="tag" href="#" data-tag="${esc(t.tag)}">#${esc(t.tag)}</a>`
+    },
+    {
+      // @Millie is shown as Millie (and leads to the notes that mention her); @friday is a date, left as it is
+      name: 'person',
+      level: 'inline',
+      start: (src) => {
+        const m = /(^|[\s(\[{,;:"'“‘])@\p{L}/u.exec(src);
+        return m ? m.index + m[1].length : undefined;
+      },
+      tokenizer(src) {
+        const m = /^@([\p{L}][\p{L}\p{N}_'’.-]*)/u.exec(src);
+        const name = m && cleanName(m[1]);
+        if (name) return { type: 'person', raw: '@' + name, name };
+      },
+      renderer: (t) => `<a class="person" href="#" data-person="${esc(personKey(t.name))}" title="${esc(`Notes that mention ${displayName(t.name)}`)}">${esc(displayName(t.name))}</a>`
     }
   ],
   renderer: {
@@ -186,7 +202,7 @@ function renderMarkdown(text) {
   return DOMPurify.sanitize(html, { RETURN_DOM_FRAGMENT: true, ADD_ATTR: ['target'], FORBID_TAGS: ['style', 'form'], FORBID_ATTR: ['style'] });
 }
 
-const URL_RE = /\bhttps?:\/\/[^\s<>"')\]]+[^\s<>"')\].,;:!?]/g;
+const URL_RE = /\bhttps?:\/\/[^\s<>"')\]]+[^\s<>"')\].,;:!?]|(?<=^|[\s(\[{,;:"'“‘])@[\p{L}][\p{L}\p{N}_'’.-]*/gu;
 function renderPlain(text) {
   const out = document.createDocumentFragment();
   const box = document.createElement('div');
@@ -210,11 +226,25 @@ function renderPlain(text) {
     let at = 0;
     for (const u of rest.matchAll(URL_RE)) {
       div.append(rest.slice(at, u.index));
+      at = u.index + u[0].length;
       const a = document.createElement('a');
+      if (u[0][0] === '@') {
+        // (a person, shown by name)
+        const name = cleanName(u[0].slice(1));
+        if (!name) {
+          div.append(u[0]);
+          continue;
+        }
+        a.href = '#';
+        a.className = 'person';
+        a.dataset.person = personKey(name);
+        a.textContent = displayName(name);
+        div.append(a, u[0].slice(1 + name.length));
+        continue;
+      }
       a.href = u[0];
       a.textContent = u[0];
       div.append(a);
-      at = u.index + u[0].length;
     }
     div.append(rest.slice(at));
     if (!line) div.append(' ');
@@ -228,7 +258,8 @@ function renderPlain(text) {
 export function toHTML(text) {
   const tokens = md.lexer(text);
   lines(tokens, 0);
-  return DOMPurify.sanitize(md.parser(tokens), { FORBID_TAGS: ['style', 'form', 'input'], FORBID_ATTR: ['style', 'data-line', 'class'] });
+  // (people as their names, not links that lead nowhere outside TimNote)
+  return DOMPurify.sanitize(md.parser(tokens), { FORBID_TAGS: ['style', 'form', 'input'], FORBID_ATTR: ['style', 'data-line', 'class'] }).replace(/<a [^>]*data-person="[^"]*"[^>]*>([^<]*)<\/a>/g, '$1');
 }
 /** a short answer (from the AI) as HTML, with [[note]] links */
 export function renderSnippet(text) {

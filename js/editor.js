@@ -16,6 +16,7 @@ import * as S from './settings.js';
 import { parse, toggleLine, toggleWordOnLine, listItem } from './tasks.js';
 import { todayIso, dayWord, fmtShort, DAYS } from './dates.js';
 import { icon } from './util.js';
+import { cleanName, personKey, displayName } from './people.js';
 
 const external = Annotation.define(); // a change that didn't come from typing (a reload from the file)
 const setBase = StateEffect.define();
@@ -93,7 +94,7 @@ class BoxWidget extends WidgetType {
 }
 const TAG = /(?:^|[\s(\[,;])(#[\p{L}\p{N}_/-]*\p{L}[\p{L}\p{N}_/-]*)/gu;
 const WIKI = /\[\[[^\]\n]+\]\]/g;
-const PERSON = /(?:^|[\s(\[,;])(@[\p{L}][\p{L}\p{N}_'’-]*)/gu;
+const MENTION = /(^|[\s(\[{,;:"'“‘])@([\p{L}][\p{L}\p{N}_'’.-]*)/gu;
 const URLRE = /\bhttps?:\/\/[^\s<>"')\]]+[^\s<>"')\].,;:!?]/g;
 
 function build(view) {
@@ -124,10 +125,13 @@ function build(view) {
           const i = text.indexOf(t.dueText);
           if (i >= 0) out.push(Decoration.mark({ class: 'cm-due' + (t.due < todayIso() && !t.done ? ' overdue' : ''), attributes: { title: fmtShort(t.due, true) } }).range(line.from + i, line.from + i + t.dueText.length));
         }
-        for (const m of text.matchAll(PERSON)) {
-          const i = m.index + m[0].length - m[1].length;
-          const name = m[1].slice(1).replace(/[.'’-]+$/, '');
-          if (t.people.includes(name)) out.push(Decoration.mark({ class: 'cm-person' }).range(line.from + i, line.from + i + 1 + name.length));
+      }
+      if (text.includes('@')) {
+        for (const m of text.matchAll(MENTION)) {
+          const name = cleanName(m[2]);
+          if (!name) continue;
+          const i = m.index + m[1].length;
+          out.push(Decoration.mark({ class: 'cm-person', attributes: { title: `${displayName(name)}: Ctrl+click for the notes that mention them` } }).range(line.from + i, line.from + i + 1 + name.length));
         }
       }
       for (const m of text.matchAll(TAG)) {
@@ -368,6 +372,23 @@ export function createEditor(parent, o) {
                     if (col >= m.index && col <= m.index + m[0].length) {
                       e.preventDefault();
                       o.onOpen({ wiki: m[0].slice(2, -2).split('|')[0].trim() });
+                      return true;
+                    }
+                  }
+                  for (const m of line.text.matchAll(MENTION)) {
+                    const at = m.index + m[1].length;
+                    const name = cleanName(m[2]);
+                    if (name && col >= at && col <= at + 1 + name.length) {
+                      e.preventDefault();
+                      o.onOpen({ person: personKey(name) });
+                      return true;
+                    }
+                  }
+                  for (const m of line.text.matchAll(TAG)) {
+                    const at = m.index + m[0].length - m[1].length;
+                    if (col >= at && col <= at + m[1].length) {
+                      e.preventDefault();
+                      o.onOpen({ tag: m[1].slice(1).toLowerCase() });
                       return true;
                     }
                   }

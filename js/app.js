@@ -1,9 +1,11 @@
 /* =====================================================================
    TimNote: the app. Opens the folder (or asks for it), keeps the notes
    up to date, and shows a page for each address:
-     #/note/<path>        a note           #/list/<id>        a list
-     #/new/<template>     a new note       #/calendar/<y-m>   the calendar
-     #/today              today's note     #/search/<words>   search
+     #/note/<path>        a note           #/lists            all the lists
+     #/new/<template>     a new note       #/list/<id>        a list
+     #/today              today's note     #/calendar/<y-m>   the calendar
+     #/tags, #/tags/@<person>, #/tags/#<topic>   people and topics
+     #/board/<name>       a board          #/search/<words>   search
    ===================================================================== */
 import { h, toast, keyLabel, dialogOpen, modal, btn, confirmDialog } from './util.js';
 import * as fsx from './fsx.js';
@@ -16,6 +18,9 @@ import { todayIso } from './dates.js';
 import { Sidebar } from './views/sidebar.js';
 import { NoteView } from './views/note.js';
 import { ListView } from './views/lists.js';
+import { OverviewView } from './views/overview.js';
+import { TagsView } from './views/tags.js';
+import { BoardView } from './views/board.js';
 import { CalendarView } from './views/calendar.js';
 import { SearchView } from './views/search.js';
 import { welcome, reconnectScreen, unsupported } from './views/welcome.js';
@@ -35,6 +40,10 @@ export const app = {
     } else location.hash = hash;
   },
   noteHash: (path, line) => '#/note/' + encodeURIComponent(path) + (line != null ? '?line=' + line : ''),
+  /** a person's page ('@millie') or a tag's ('#grant') */
+  tagHash: (t) => '#/tags/' + encodeURIComponent(t),
+  /** a board's page (b: the board, or what its address says) */
+  boardHash: (b) => '#/board/' + encodeURIComponent(typeof b === 'string' ? b : lib.boardKey(b)),
   openNote(path, line) {
     app.navigate(app.noteHash(path, line));
   },
@@ -156,16 +165,22 @@ async function route() {
       if (my !== seq) return;
       history.replaceState(null, '', app.noteHash(d.note.path));
       v = new NoteView({ path: d.note.path, cursor: d.created ? d.cursor : null });
+    } else if (r.name === 'lists') {
+      v = new OverviewView();
     } else if (r.name === 'list') {
       v = new ListView(r.arg || (S.shared.lists[0] && S.shared.lists[0].id));
+    } else if (r.name === 'tags') {
+      v = new TagsView(r.arg);
+    } else if (r.name === 'board') {
+      v = new BoardView(r.arg);
     } else if (r.name === 'calendar') {
       v = new CalendarView(r.arg);
     } else if (r.name === 'search') {
       v = new SearchView(r.arg);
     } else {
-      // home: the last note, or To do
-      const last = S.device.lastPath && lib.get(S.device.lastPath);
-      return app.navigate(last ? app.noteHash(last.path) : '#/list/' + ((S.shared.lists[0] && S.shared.lists[0].id) || 'todo'), { replace: true });
+      // home: the lists, side by side (or the last note, if that is what this computer is set to open on)
+      const last = S.device.home === 'last' && S.device.lastPath && lib.get(S.device.lastPath);
+      return app.navigate(last ? app.noteHash(last.path) : '#/lists', { replace: true });
     }
   } catch (e) {
     console.error(e);
@@ -267,7 +282,7 @@ function keys(e) {
     newNoteDialog();
   } else if (e.altKey && !mod && e.code === 'KeyL') {
     e.preventDefault();
-    app.navigate('#/list/' + ((S.shared.lists[0] && S.shared.lists[0].id) || 'todo'));
+    app.navigate('#/lists');
   } else if (e.altKey && !mod && e.code === 'KeyC') {
     e.preventDefault();
     app.navigate('#/calendar/');
@@ -283,7 +298,7 @@ export const SHORTCUTS = [
   ['Ctrl+K', 'Find a note, or a command'],
   ['Ctrl+Shift+F', 'Search all the notes'],
   ['Alt+N', 'New note'],
-  ['Alt+L', 'The To do list'],
+  ['Alt+L', 'All the lists'],
   ['Alt+C', 'The calendar'],
   ['Ctrl+E', 'Write or read the note'],
   ['Ctrl+S', 'Save now (it saves as you type anyway)'],

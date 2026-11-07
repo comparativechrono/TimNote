@@ -1,4 +1,5 @@
-/* The sidebar: the folder, search, new note, the lists with how much is on them, and the notes, newest first. */
+/* The sidebar: the folder, search, new note, the lists with how much is on them, tags, boards (things can be dragged
+   onto a board's name), and the notes, newest first. */
 import { h, icon, iconEl, iconBtn, menu, toast, debounce, keyLabel, plural } from '../util.js';
 import * as lib from '../library.js';
 import * as S from '../settings.js';
@@ -6,6 +7,9 @@ import * as fsx from '../fsx.js';
 import { on } from '../bus.js';
 import { MONTHS, DAYS, fromIso, todayIso } from '../dates.js';
 import { app } from '../app.js';
+import { draggable, dropTarget, notePayload } from '../drag.js';
+import { addToBoard, newBoard } from './board.js';
+import { findItem, moveItem } from './items.js';
 
 const PAGE = 300;
 
@@ -18,6 +22,7 @@ export class Sidebar {
     const re = debounce(() => this.render(), 120);
     on('notes', re);
     on('settings', re);
+    on('boards', (d) => d.list && re());
     this.render();
   }
 
@@ -74,17 +79,39 @@ export class Sidebar {
 
     const counts = lib.counts();
     const lists = h('nav.sb-lists', { 'aria-label': 'Lists' });
+    const allOpen = S.shared.lists.reduce((a, l) => a + (l.done ? (counts[l.id] || { open: 0 }).open : 0), 0);
+    lists.append(h('a.sb-list.sb-overview', { href: '#/lists', dataset: { id: ':lists' }, title: 'All the lists, side by side' }, iconEl('layout-grid'), h('span.sb-list-name', 'All lists'), allOpen ? h('span.count', String(allOpen)) : null));
     for (const l of S.shared.lists) {
       const c = counts[l.id] || { open: 0, all: 0 };
       const n = l.done ? c.open : c.all;
-      lists.append(
-        h('a.sb-list', { href: '#/list/' + encodeURIComponent(l.id), dataset: { id: l.id } }, h(`span.swatch.hl-${l.color || 'yellow'}`), h('span.sb-list-name', l.name), n ? h('span.count', String(n)) : null)
-      );
+      const a = h('a.sb-list', { href: '#/list/' + encodeURIComponent(l.id), dataset: { id: l.id } }, h(`span.swatch.hl-${l.color || 'yellow'}`), h('span.sb-list-name', l.name), n ? h('span.count', String(n)) : null);
+      // (an item dragged here from another list moves to this one)
+      dropTarget(a, {
+        accept: (p) => p.kind === 'item' && p.list !== l.id,
+        drop: (p) => {
+          const it = findItem(p);
+          if (it) moveItem(it, l.id);
+          else toast('That item has changed since: open its note to move it.', 'warn');
+        }
+      });
+      lists.append(a);
     }
     lists.append(h('a.sb-list.sb-cal', { href: '#/calendar/', dataset: { id: 'calendar' } }, iconEl('calendar'), h('span.sb-list-name', 'Calendar')));
+    const people = lib.peopleIndex().size;
+    lists.append(h('a.sb-list.sb-tags', { href: '#/tags', dataset: { id: 'tags' }, title: 'Everyone tagged with @, and the #topics' }, iconEl('at-sign'), h('span.sb-list-name', 'Tags'), people ? h('span.count', String(people)) : null));
+
+    // boards: things dragged onto one's name go on it
+    const boards = h('nav.sb-boards', { 'aria-label': 'Boards' });
+    boards.append(h('div.sb-group.sb-boards-head', h('span', 'Boards'), h('button.icon-btn.small.sb-board-new', { type: 'button', title: 'A new board', 'aria-label': 'A new board', onclick: () => newBoard(), html: icon('plus') })));
+    for (const b of lib.boards) {
+      const a = h('a.sb-list.sb-board', { href: app.boardHash(b), dataset: { key: lib.boardKey(b) }, title: `${b.path}: drag a note or an item here to add it` }, iconEl('square-kanban'), h('span.sb-list-name', b.name));
+      dropTarget(a, { accept: (p) => p.kind === 'item' || p.kind === 'note', drop: (p) => addToBoard(b, p) });
+      boards.append(a);
+    }
+    if (!lib.boards.length) boards.append(h('button.sb-list.sb-board-empty', { type: 'button', onclick: () => newBoard() }, iconEl('plus'), h('span.sb-list-name', 'Make a board')));
 
     this.notesBox = h('div.sb-notes', { role: 'list' });
-    const scrollBox = h('div.sb-scroll', lists, this.notesBox);
+    const scrollBox = h('div.sb-scroll', lists, boards, this.notesBox);
     const foot = h('div.sb-foot');
     if (info.mode === 'browser') foot.append(h('div.sb-warn', iconEl('triangle-alert'), h('span', 'Notes are kept in this browser only: they aren’t synced. Choose a folder in Settings.')));
     const conflicts = lib.all({ archived: true }).filter((n) => n.conflict);
@@ -160,6 +187,7 @@ export class Sidebar {
       n.open ? h('span.sb-open', { title: plural(n.open, 'item') + ' still to do' }, String(n.open)) : null
     );
     if (pinned) a.classList.add('pinned');
+    draggable(a, () => notePayload(n), n.title);
     return a;
   }
 
@@ -184,6 +212,16 @@ export class Sidebar {
       if (a) a.classList.add('active');
     } else if (r.name === 'calendar') {
       const a = this.el.querySelector('.sb-cal');
+      if (a) a.classList.add('active');
+    } else if (r.name === 'lists') {
+      const a = this.el.querySelector('.sb-overview');
+      if (a) a.classList.add('active');
+    } else if (r.name === 'tags') {
+      const a = this.el.querySelector('.sb-tags');
+      if (a) a.classList.add('active');
+    } else if (r.name === 'board') {
+      const b = lib.findBoard(r.arg);
+      const a = b && Array.from(this.el.querySelectorAll('.sb-board')).find((x) => x.dataset.key === lib.boardKey(b));
       if (a) a.classList.add('active');
     }
   }

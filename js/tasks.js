@@ -18,7 +18,8 @@
 
    Nothing here touches the page or the files: it is text in, text out.
    ===================================================================== */
-import { dayWord, ukDate, dayMonthName, isDayWord, validIso, iso } from './dates.js';
+import { dayWord, ukDate, dayMonthName, validIso, iso } from './dates.js';
+import { cleanName } from './people.js';
 
 export const COLORS = ['yellow', 'pink', 'blue', 'green', 'orange', 'lilac', 'grey'];
 
@@ -147,9 +148,8 @@ export function itemMeta(text, base) {
   }
   const people = [];
   for (const m of text.matchAll(PEOPLE)) {
-    const name = m[1].replace(/[.'’-]+$/, '');
-    if (!name || /^next$/i.test(name) || isDayWord(name) || /^\d/.test(name)) continue;
-    if (!people.includes(name)) people.push(name);
+    const name = cleanName(m[1]);
+    if (name && !people.includes(name)) people.push(name);
   }
   const tags = [];
   for (const m of text.matchAll(TAGS)) if (!tags.includes(m[1].toLowerCase())) tags.push(m[1].toLowerCase());
@@ -230,7 +230,11 @@ export function parse(text, C, base) {
       labels.push({ line: i, from: found.start, to: found.end, list: e.list.id, kind: e.kind });
       const box = li ? li.box : null;
       push(e.list, i, 'inline', e.kind === 'done' || box === 'x', line, rest, box);
-      if (block && li) block.started = true;
+      if (block && li) {
+        // (an item with a word of its own still sets the block's indent: what is under it is a note, not an item)
+        block.started = true;
+        if (block.indent == null) block.indent = li.indent;
+      }
       continue;
     }
     if (blockEntry) {
@@ -305,6 +309,54 @@ export function toggleAt(text, task, done, C, base) {
 export function toggleInText(text, task, done, C, base) {
   const r = toggleAt(text, task, done, C, base);
   return r ? r.text : null;
+}
+
+/* ---------------- moving to another list ---------------- */
+/** one line, moved to another list: "TO DO: book the room" → "WAITING FOR: book the room"; an item with no word of
+    its own ("- book the room" under "## To do", or "- [ ] book the room") gets the other list's word. → the line, or
+    null if it can't be moved (it is done, say) */
+export function retagLine(line, task, toList, C) {
+  const word = parseTrigger((toList.triggers || [])[0] || '');
+  if (!word.words.length || task.done) return null;
+  if (task.kind === 'inline') {
+    const f = findLabel(line, C);
+    if (!f || f.entry.list.id !== task.list || f.entry.kind !== 'open') return null;
+    const old = line.slice(f.labelStart, f.labelEnd);
+    let after = line.slice(f.labelEnd);
+    const colon = /^(?:\*\*|__)?[ \t]*:/.test(after);
+    if (colon && !word.colon) after = after.replace(/^((?:\*\*|__)?)[ \t]*:/, '$1');
+    else if (!colon && word.colon) after = after.replace(/^((?:\*\*|__)?)/, '$1:');
+    // (written in capitals, small letters or with a capital first, as the old word was)
+    const w = old === old.toUpperCase() ? word.label.toUpperCase() : matchCase(word.label, old);
+    return line.slice(0, f.labelStart) + w + after;
+  }
+  const li = listItem(line);
+  if (!li) return null;
+  return line.slice(0, li.contentAt) + word.label + (word.colon ? ': ' : ' ') + line.slice(li.contentAt);
+}
+/** the whole text with one item moved to another list. → {text, line, raw} or null (as toggleAt) */
+export function retagAt(text, task, toList, C, base) {
+  if (!toList || toList.id === task.list) return null;
+  const lines = String(text).split('\n');
+  let at = task.line;
+  if (lines[at] !== task.raw) {
+    const first = lines.indexOf(task.raw);
+    if (first < 0 || lines.indexOf(task.raw, first + 1) >= 0) return null;
+    at = first;
+  }
+  const now = parse(text, C, base).tasks.find((t) => t.line === at && t.list === task.list);
+  if (!now) return null;
+  const next = retagLine(lines[at], now, toList, C);
+  if (next == null) return null;
+  lines[at] = next;
+  const out = lines.join('\n');
+  // (only if it is on the other list now, and no other line has gone onto a list, or off one, because of it)
+  const was = parse(text, C, base).tasks;
+  const now2 = parse(out, C, base).tasks;
+  if (!now2.some((t) => t.line === at && t.list === toList.id)) return null;
+  const sig = (ts) => ts.filter((t) => t.line !== at).map((t) => t.line + ':' + t.list + ':' + t.done).join('|');
+  if (sig(was) !== sig(now2)) return null;
+  return { text: out, line: at, raw: next };
 }
 
 /** a new line for a list: "TO DO: book the room @2026-11-13" */

@@ -19,6 +19,7 @@ export const SHARED_DEFAULTS = {
   templatesFolder: 'Templates',
   archiveFolder: 'Archive',
   attachmentsFolder: 'attachments',
+  boardsFolder: 'Boards',
   pinned: [],
   ai: {
     provider: 'gemini',
@@ -38,7 +39,12 @@ export const DEVICE_DEFAULTS = {
   sidebar: true,
   showArchive: false,
   lastPath: '',
+  home: 'lists', // what TimNote opens on: 'lists' (the lists, side by side) or 'last' (the last note)
+  overview: 'tiles', // the lists page: 'tiles' or 'map'
+  boardTray: true, // a board's tray of list items and notes to drag on
+  tagSort: 'recent',
   listGroup: {},
+  listMode: {}, // a list's page: 'list' or 'map', by list
   listShowDone: {},
   dictation: { engine: 'browser', lang: 'en-GB', spoken: true },
   keysIn: 'computer'

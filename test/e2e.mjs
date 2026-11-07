@@ -65,7 +65,8 @@ try {
   await page.waitForTimeout(400);
   const files0 = await fs.list();
   ok(files0.includes('Templates/Meeting notes.md') && files0.length === 8, 'the built-in templates are written to the Templates folder');
-  ok(await page.locator('.list-view h1').innerText() === 'To do', 'it opens on the To do list');
+  await page.waitForSelector('.overview .tile');
+  ok(await page.locator('.overview .tile').count() === 6 && (await page.locator('.overview .tile-title').first().innerText()) === 'To do', 'it opens on the lists, side by side');
   await shot('empty-list');
 
   console.log('A meeting note from its template');
@@ -205,9 +206,9 @@ try {
   await page.keyboard.press('Control+z');
   ok(!(await editorText()).includes('Tidied:'), 'Ctrl+Z undoes it');
 
-  console.log('Dark, and coming back later');
+  console.log('Dark, and coming back later (set to open on the last note)');
   await page.evaluate(() => {
-    localStorage.setItem('timnote:device', JSON.stringify(Object.assign(JSON.parse(localStorage.getItem('timnote:device') || '{}'), { theme: 'dark' })));
+    localStorage.setItem('timnote:device', JSON.stringify(Object.assign(JSON.parse(localStorage.getItem('timnote:device') || '{}'), { theme: 'dark', home: 'last' })));
   });
   await page.goto('http://localhost:8765/');
   await page.waitForSelector('.note-view .cm-content');

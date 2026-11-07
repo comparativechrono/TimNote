@@ -1,5 +1,6 @@
-/* A list's page: everything on it from all the notes, by date due, by note, by person or by tag. Ticking an item
-   off changes the line in its note's file; clicking it opens the note at that line. */
+/* A list's page: everything on it from all the notes, by date due, by note, by person or by tag (or as a mind map).
+   Ticking an item off changes the line in its note's file; clicking it opens the note at that line. Items can be
+   dragged onto a board, or another list in the sidebar. */
 import { h, icon, iconEl, iconBtn, btn, menu, toast, copyText, download, debounce, plural } from '../util.js';
 import * as lib from '../library.js';
 import * as S from '../settings.js';
@@ -7,6 +8,12 @@ import { on } from '../bus.js';
 import { todayIso, addDays, relDay, fmtShort, fmtDayMonth, daysBetween, fromIso } from '../dates.js';
 import { app } from '../app.js';
 import { toICS } from '../ics.js';
+import { inline } from '../inline.js';
+import { draggable, itemPayload } from '../drag.js';
+import { displayName } from '../people.js';
+import { MapCanvas } from '../canvas.js';
+import { itemsTree, treeLayout } from '../mapdata.js';
+import { tickItem } from './items.js';
 
 const GROUPS = { due: 'Date due', note: 'Note', person: 'Person', tag: 'Tag', none: 'Newest first' };
 
@@ -34,6 +41,14 @@ export class ListView {
   get showDone() {
     return !!S.device.listShowDone[this.id];
   }
+  get mode() {
+    return (S.device.listMode || {})[this.id] === 'map' ? 'map' : 'list';
+  }
+  setMode(m) {
+    S.device.listMode = Object.assign({}, S.device.listMode, { [this.id]: m });
+    S.saveDevice();
+    this.render();
+  }
 
   render() {
     const l = this.list;
@@ -43,6 +58,10 @@ export class ListView {
     }
     const scroll = this.el.querySelector('.list-scroll') ? this.el.querySelector('.list-scroll').scrollTop : 0;
     const focusAdd = document.activeElement && document.activeElement.classList.contains('qa-text');
+    // (what is being typed in the box at the top is kept when the list is drawn again)
+    const typed = this.el.querySelector('.qa-text') ? this.el.querySelector('.qa-text').value : '';
+    const typedDue = this.el.querySelector('.qa-due') ? this.el.querySelector('.qa-due').value : '';
+    const caret = focusAdd ? document.activeElement.selectionStart : null;
     const all = lib.items(l.id);
     const q = lib.fold(this.filter).trim();
     const match = (it) => !q || q.split(/\s+/).every((w) => lib.fold(it.task.text + ' ' + it.note.title).includes(w));
@@ -73,12 +92,20 @@ export class ListView {
         h('h1', h(`span.swatch.big.hl-${l.color || 'yellow'}`), l.name),
         h('p.page-sub', l.done ? `${open.length} still to do${done.length ? `, ${done.length} done` : ''}.` : `${plural(items.length, 'item')}.`, h('span.words', ' Lines with ', words.map((w, i) => [i ? (i === words.length - 1 ? ' or ' : ', ') : '', h('code', w)]), ' come here.'))
       ),
-      h('div.page-tools', filter, h('label.inline', h('span', 'Group'), groupSel), more)
+      h(
+        'div.page-tools',
+        filter,
+        h('label.inline', h('span', 'Group'), groupSel),
+        h('div.segs', { role: 'group', 'aria-label': 'Show as' }, h('button.seg', { type: 'button', 'aria-pressed': String(this.mode === 'list'), onclick: () => this.setMode('list') }, iconEl('list'), h('span', 'List')), h('button.seg', { type: 'button', 'aria-pressed': String(this.mode === 'map'), onclick: () => this.setMode('map') }, iconEl('network'), h('span', 'Mind map'))),
+        more
+      )
     );
 
     // adding to the list
     const text = h('input.input.qa-text', { type: 'text', placeholder: `Add to ${l.name}…`, 'aria-label': `Add to ${l.name}` });
+    text.value = typed;
     const due = h('input.input.qa-due', { type: 'date', 'aria-label': 'Date due (optional)', title: 'Date due (optional)' });
+    due.value = typedDue;
     const add = h('form.quick-add', h('span.qa-icon', { html: icon('plus') }), text, due, h('button.btn.primary.small', { type: 'submit' }, 'Add'), h('span.qa-hint', 'It goes in today’s daily note.'));
     add.addEventListener('submit', async (e) => {
       e.preventDefault();
@@ -94,6 +121,20 @@ export class ListView {
       }
     });
 
+    const refocus = () => {
+      if (!focusAdd) return;
+      text.focus();
+      if (caret != null) text.setSelectionRange(caret, caret);
+    };
+    if (this.mode === 'map') {
+      this.el.replaceChildren(head, add, this.mapView(open));
+      refocus();
+      return;
+    }
+    if (this.map) {
+      this.map.destroy();
+      this.map = null;
+    }
     const box = h('div.list-scroll');
     if (!all.length) {
       box.append(
@@ -122,7 +163,7 @@ export class ListView {
     }
     this.el.replaceChildren(head, add, box);
     box.scrollTop = scroll;
-    if (focusAdd) text.focus();
+    refocus();
   }
 
   isDone(it) {
@@ -165,7 +206,7 @@ export class ListView {
         }
       }
       const keys = Array.from(m.keys()).sort((a, b) => (a === '' ? 1 : b === '' ? -1 : a.localeCompare(b)));
-      for (const k of keys) out.push([k ? '@' + k : 'No one named', m.get(k)]);
+      for (const k of keys) out.push([k ? displayName(k) : 'No one named', m.get(k)]);
     } else if (g === 'tag') {
       const m = new Map();
       for (const it of items) {
@@ -191,7 +232,7 @@ export class ListView {
       cb.addEventListener('change', () => this.toggle(it, cb.checked, li));
       li.append(cb);
     } else li.append(h('span.item-dot', { 'aria-hidden': 'true' }, h(`span.swatch.hl-${l.color || 'yellow'}`)));
-    const text = h('a.item-text', { href: app.noteHash(note.path, task.line), title: 'Open the note at this line' }, ...richText(task));
+    const text = h('a.item-text', { href: app.noteHash(note.path, task.line), title: 'Open the note at this line', draggable: 'false' }, ...richText(task));
     const meta = h('span.item-meta');
     if (task.due) {
       const n = daysBetween(todayIso(), task.due);
@@ -199,7 +240,49 @@ export class ListView {
     }
     if (this.group !== 'note') meta.append(h('a.item-src', { href: app.noteHash(note.path, task.line), title: note.path }, `${note.title}, ${fmtDayMonth(note.date)}`));
     li.append(h('div.item-main', text, meta));
+    draggable(li, () => itemPayload(task, note), task.text);
     return li;
+  }
+
+  /** the list as a mind map: the list in the middle, its groups (days, notes, people or tags) round it, the items
+      round them */
+  mapView(open) {
+    const l = this.list;
+    const groups = this.groups(open).filter(([, list]) => list.length).map(([title, list]) => ({ key: title || 'all', title: title || null, items: list }));
+    const tree = itemsTree(l.name, groups, { max: 40 });
+    const branches = new Map(tree.root.children.map((c, i) => [c.key, i]));
+    const cards = [];
+    const walk = (n, branch) => {
+      const t = n.task;
+      let caption = null;
+      if (t) caption = [t.due ? relDay(t.due) : '', this.group === 'note' ? '' : n.note.title].filter(Boolean).join(', ') || null;
+      cards.push({ key: n.key, kind: n.kind, text: n.text, line: t ? t.line : null, task: t, note: n.note, group: n.group, branch, listColour: t ? l.color || 'yellow' : null, caption, hide: t ? t.dueText : '' });
+      n.children.forEach((c) => walk(c, branch == null ? branches.get(c.key) : branch));
+    };
+    walk(tree.root, null);
+    const items = { cards, links: tree.links, layout: (size) => treeLayout(tree.root, size) };
+    const key = 'list:' + l.id + ':' + this.group;
+    if (this.map && this.map.o.key !== key) {
+      this.map.destroy();
+      this.map = null;
+    }
+    if (this.map) {
+      this.map.setItems(items);
+      return this.mapHost;
+    }
+    this.mapHost = h('div.map-host');
+    this.map = new MapCanvas(
+      Object.assign(items, {
+        key,
+        fileName: l.name,
+        empty: `Nothing on ${l.name} still to do.`,
+        onOpen: (c) => c.note && app.openNote(c.note.path, c.line),
+        onToggle: (c) => c.note && c.task && tickItem({ task: c.task, note: c.note }, !c.task.done)
+      })
+    );
+    this.mapHost.append(this.map.el);
+    requestAnimationFrame(() => this.map && this.map.mount());
+    return this.mapHost;
   }
 
   async toggle(it, done, li) {
@@ -256,27 +339,11 @@ export class ListView {
   }
   destroy() {
     for (const off of this.offs) off();
+    if (this.map) this.map.destroy();
   }
 }
 
-/** an item's text, with its dates, people and tags shown as such */
+/** an item's text, with its people (by name), tags and links shown as such (an @date is shown beside it instead) */
 export function richText(task) {
-  const out = [];
-  const re = /(@[\p{L}\p{N}][\p{L}\p{N}_'’./-]*|#[\p{L}\p{N}_/-]*\p{L}[\p{L}\p{N}_/-]*|\[\[[^\]]+\]\])/gu;
-  let at = 0;
-  const text = task.text;
-  for (const m of text.matchAll(re)) {
-    if (m.index > at) out.push(text.slice(at, m.index));
-    const s = m[0];
-    if (s.startsWith('#')) out.push(h('span.tag', s));
-    else if (s.startsWith('[[')) out.push(h('span.wikilink', s.slice(2, -2)));
-    else if (task.dueText && task.dueText.includes(s)) {
-      if (!task.dueText.startsWith('@')) out.push(h('span.when', s)); // (an @date is shown as the date beside it)
-    }
-    else out.push(h('span.person', s));
-    at = m.index + s.length;
-  }
-  if (at < text.length) out.push(text.slice(at));
-  if (typeof out[out.length - 1] === 'string') out[out.length - 1] = out[out.length - 1].replace(/\s+$/, '');
-  return out;
+  return inline(task.text, { hide: task.dueText, marks: false });
 }

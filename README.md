@@ -1,6 +1,6 @@
 # TimNote
 
-**Notes and to-do lists, kept as plain text files in a folder you choose.** Every note is an ordinary `.md` or `.txt` file named with its date, such as `2026-11-06 Lab meeting.md`, so any file manager can find it and search inside it. Write `TO DO:` in any note and the line goes on your To do list; tick it off there and the note itself says `DONE:`. Point it at a folder in Dropbox and every computer sees the same notes.
+**Notes and to-do lists, kept as plain text files in a folder you choose.** Every note is an ordinary `.md` or `.txt` file named with its date, such as `2026-11-06 Lab meeting.md`, so any file manager can find it and search inside it. Write `TO DO:` in any note and the line goes on your To do list; tick it off there and the note itself says `DONE:`. Write `@Millie` and the note is tagged with Millie. Point it at a folder in Dropbox and every computer sees the same notes.
 
 **Open it: [comparativechrono.github.io/TimNote](https://comparativechrono.github.io/TimNote/)** (in Chrome or Edge, on a computer).
 
@@ -13,17 +13,20 @@ It runs entirely in your browser. There is no server and no account: your notes 
 1. [Starting it](#starting-it)
 2. [Notes are files](#notes-are-files)
 3. [Lists](#lists)
-4. [Writing](#writing)
-5. [Templates](#templates)
-6. [Dictation](#dictation)
-7. [The AI](#the-ai)
-8. [Finding things](#finding-things)
-9. [Several computers, and Dropbox](#several-computers-and-dropbox)
-10. [Settings](#settings)
-11. [Keyboard shortcuts](#keyboard-shortcuts)
-12. [Your data](#your-data)
-13. [Files](#files)
-14. [How it was tested](#how-it-was-tested)
+4. [People and tags](#people-and-tags)
+5. [Mind maps](#mind-maps)
+6. [Boards](#boards)
+7. [Writing](#writing)
+8. [Templates](#templates)
+9. [Dictation](#dictation)
+10. [The AI](#the-ai)
+11. [Finding things](#finding-things)
+12. [Several computers, and Dropbox](#several-computers-and-dropbox)
+13. [Settings](#settings)
+14. [Keyboard shortcuts](#keyboard-shortcuts)
+15. [Your data](#your-data)
+16. [Files](#files)
+17. [How it was tested](#how-it-was-tested)
 
 ---
 
@@ -80,11 +83,58 @@ Capitals don't matter (`To do:` works too), and the words can be anywhere in a l
 
 **Dates, people and tags.** Give an item a date with `@` and a day, `by` or `due`: `@friday`, `@2026-11-13`, `by Friday`, `due 13/11`, `by 3 Dec`. Days such as *Friday* count from the note's date, so *by Friday* in last Tuesday's meeting notes means last Friday. Typing `@` offers the next few days and puts in the date itself. Name who's doing it with `@Name`, and tag it with `#tag`; `!!` (or *URGENT*) marks it as important.
 
-**A list's page** groups its items by date due (overdue, today, tomorrow, later this week, later, no date), by note, by person or by tag. Click an item to open its note at that line. **Add to To do…** at the top writes the item into today's daily note. **⋯** copies the list, saves it as a note, or puts the dated items in a calendar file (`.ics`) to add to Outlook, Google or Apple Calendar, where they can remind you.
+**All the lists, side by side.** TimNote opens on **All lists**: every list as a card showing what is on it, so you can see at a glance what is on each without opening it. Swipe (or scroll, or use the arrows) across them. The first card, **Coming up**, gathers everything due in the next week, and anything overdue, from all the lists. On a card you can tick things off, click one to open its note at that line, and type at the foot of the card to add to that list (it goes in today's daily note). **Drag an item onto another list's card** (or onto a list's name in the sidebar) to move it there: its word in the note changes, so `TO DO: book the room` becomes `WAITING FOR: book the room`; **Undo** puts it back. **Mind map** shows the same as a mind map (see below).
+
+**A list's page** (click its name) groups its items by date due (overdue, today, tomorrow, later this week, later, no date), by note, by person or by tag, and shows done items too; **Mind map** shows it as a mind map, grouped the same way. Click an item to open its note at that line. **Add to To do…** at the top writes the item into today's daily note. **⋯** copies the list, saves it as a note, or puts the dated items in a calendar file (`.ics`) to add to Outlook, Google or Apple Calendar, where they can remind you.
+
+## People and tags
+
+**Write `@Millie` anywhere in a note and the note is tagged with Millie.** In Read, and on the lists, it shows as just *Millie*. For a name with a space, join it with an underscore: `@Millie_Smith` shows as *Millie Smith*. Days (`@friday`, `@tomorrow`) are dates, not people, and an email address isn't a mention. Typing `@` offers the people you've mentioned before.
+
+**Tags** (in the sidebar) lists everyone you've mentioned, most recent first (or A to Z, or by how many notes), with how many notes mention them and how much is still to do, and the `#topics` below. **Choose someone to see what is still to do that mentions them, and every note that does, newest first, with the lines where they come up.** Click a name in Read (or Ctrl+click `@Millie` while writing) to go straight there. A `#topic` has a page like that too.
+
+## Mind maps
+
+**Any note can be seen as a mind map: press Map** at the top of the note (beside Write and Read). The title is in the middle; its headings branch out from it, and each paragraph, bullet and line is a card joined to the heading it is under (bullets under bullets, under their bullet). Items on a list keep their colour and their tick box. **The note isn't changed.**
+
+- Drag cards to arrange them; Shift+click (or Shift+drag round them) to move several. Drag the background to move around; the mouse wheel or a pinch zooms; **F** (or the first button) fits it all in.
+- Drag from the dot on a card's edge to another card to draw an arrow between them; click an arrow and press Delete to remove it.
+- **Colour** colours the chosen cards. Delete takes a card off the map (not out of the note); **Show … taken off** brings them back. **Arrange again** puts everything back where it started.
+- Double-click a card to open the note at that line. Tick a card's box to tick the line off in the note.
+- **Export** saves it as a picture (PNG) or a drawing (SVG).
+
+Where the cards are, their colours and the arrows are kept in `.timnote/maps/` in your notes folder, so the map is the same on every computer (and moves with the note if it is renamed). Change the note and the map follows: new lines are new cards.
+
+**The lists** can be seen as a mind map too: **Mind map** on the All lists page (the lists round the middle, their items round them), or on a list's page.
+
+## Boards
+
+**A board (kanban) is something you turn on when you want one.** Press **+** beside *Boards* in the sidebar and give it a name. It starts with three columns, *To do*, *Doing* and *Done*, and is kept as a Markdown file in the *Boards* folder, so it is the same on every computer and can be read anywhere:
+
+```
+## To do
+
+- [ ] Book the seminar room
+- [ ] [[2026-11-06 Lab meeting]]
+- [ ] send Sarah the figures (from [[2026-11-06 Lab meeting]])
+
+## Doing
+
+## Done
+```
+
+(This is the form the Kanban plugin for Obsidian uses, if you use Obsidian too.)
+
+- **Drag things on.** **Add from lists** opens a tray beside the board with what is on your lists and your recent notes: drag one onto a column (or press its **+**). Or drag an item from any list, or a note from the sidebar, **onto the board's name in the sidebar**: it goes in the first column.
+- **A card is an item, a note, or a line of your own.** Click an item's card to open its note at that line, or a note's card to open the note. Its tick box ticks the item off in its note. Type your own card with **Add a card** at the foot of a column; click it to change it.
+- **Move cards** by dragging them between columns (or **⋯ → Move to**). **⋯** on a card also marks it done or takes it off the board (it stays in its note). **⋯** on a column renames, moves or deletes it, and **Add a column** adds one.
+- **⋯** at the top renames or deletes the board, or opens its file to edit as text.
+
+Every change is made to the board's file as it is at that moment, so a change made on another computer meanwhile is kept, and only the lines it is about change: anything else you write in the file (lines under a card, other headings, notes) stays as it is. A file is a board only if it starts with that `kanban-plugin:` line, wherever it is in your folder; boards aren't notes, so their lines don't go on your lists. (Other notes in a folder called *Boards* stay notes.) Rename a note and the cards that link to it follow it.
 
 ## Writing
 
-The note is a page with a margin: headings are larger, bold is bold, and the Markdown marks are faded rather than hidden, so what you see is what is in the file. **Write** and **Read** (Ctrl+E) switch between editing and reading; double-click anywhere in Read to edit there.
+The note is a page with a margin: headings are larger, bold is bold, and the Markdown marks are faded rather than hidden, so what you see is what is in the file. **Write** and **Read** (Ctrl+E) switch between editing and reading; double-click anywhere in Read to edit there. **Map** shows it as a mind map.
 
 - **Ctrl+Enter** ticks off the line the cursor is on; **Alt+T** puts `TO DO:` on the line (or takes it off); **Alt+D** puts in today's date.
 - Bullets and checkboxes continue when you press Enter; Enter on an empty one ends the list.
@@ -129,6 +179,7 @@ Select part of a note first to work on just that part. **Nothing goes into the n
 ## Finding things
 
 - **The sidebar** lists your notes newest first, by month, with pinned notes at the top; the number beside a note is how many of its items are still to do. **Filter notes** narrows the list as you type (titles and text).
+- **Tags** finds every note that mentions someone (`@Millie`) or has a `#topic`.
 - **Search** (Ctrl+Shift+F, or Enter in the filter) searches every note and shows the lines that match. Every word must be in the note; `"words in quotes"` must be together; `-word` leaves notes with that word out; `in:Meetings` looks in one folder.
 - **Ctrl+K** finds a note by its title, or a command, by typing a few letters.
 - **The calendar** shows each day's notes and what's due that day; choose a day to make a note on it or open its daily note.
@@ -142,7 +193,7 @@ Each computer reads and writes the same files, and Dropbox carries the changes b
 
 **Make the folder available offline** in Dropbox (right-click → *Make available offline*), so that the files are really on each computer: online-only files can't be read until Dropbox downloads them.
 
-TimNote keeps its own settings (the lists, pinned notes, the AI's model and *About you*) in `.timnote/settings.json` inside the notes folder, so they are the same on every computer. How it looks, dictation, and (usually) the AI keys are kept in each browser.
+TimNote keeps its own settings (the lists, pinned notes, the AI's model and *About you*) in `.timnote/settings.json` inside the notes folder, and the mind maps' layouts in `.timnote/maps/`, so they are the same on every computer; boards are files in the *Boards* folder. How it looks, dictation, what it opens on, and (usually) the AI keys are kept in each browser.
 
 ## Settings
 
@@ -152,7 +203,7 @@ TimNote keeps its own settings (the lists, pinned notes, the AI's model and *Abo
 | New notes | Markdown or plain text; the folder for blank notes |
 | Lists | The lists, their words, done words and colours; whether checkboxes go on To do; whether capitals must match |
 | Templates | Change them, make new ones, put back the built-in ones |
-| How it looks | Light or dark; the typeface for notes (Literata, a sans serif, or typewriter); the text size; the width of the page |
+| How it looks | Light or dark; the typeface for notes (Literata, a sans serif, or typewriter); the text size; the width of the page; whether it opens on all the lists or the last note |
 | Dictation | The browser's own or Gemini; the language; spoken punctuation |
 | The AI | Gemini or Claude; the model (and fall-backs, or Claude's effort); your keys and where they are kept; *About you* |
 | Keyboard | The shortcuts |
@@ -166,7 +217,7 @@ On a Mac, ⌘ for Ctrl and ⌥ for Alt.
 | Ctrl+K | Find a note, or a command |
 | Ctrl+Shift+F | Search all the notes |
 | Alt+N | New note (choosing the template, folder and date) |
-| Alt+L | The To do list |
+| Alt+L | All the lists |
 | Alt+C | The calendar |
 | Ctrl+E | Write or read the note |
 | Ctrl+S | Save now (it saves as you type anyway) |
@@ -176,8 +227,10 @@ On a Mac, ⌘ for Ctrl and ⌥ for Alt.
 | Alt+D | Today's date |
 | Ctrl+B, Ctrl+I | Bold, italic |
 | Ctrl+F | Find in the note |
-| Ctrl+click | Open a link, or a `[[note]]` |
+| Ctrl+click | Open a link, a `[[note]]`, or the page of an `@person` or `#topic` |
 | `@` `#` `[[` | Offer dates and people, tags, and notes to link to |
+| F, +, − (on a mind map) | Fit it all in, zoom in, zoom out |
+| Delete (on a mind map) | Take the chosen cards off the map, or remove the chosen arrow |
 
 ## Your data
 
@@ -188,7 +241,7 @@ Your notes are the files in your folder, and nothing else: TimNote keeps no copy
 | File | What it is |
 | --- | --- |
 | `index.html` | The app |
-| `js/` | Its code: `app.js` (pages and starting), `fsx.js` (the folder), `library.js` (the notes and their lists), `tasks.js` (finding and ticking off list items), `editor.js`, `render.js` (reading), `search.js`, `templates.js`, `dictation.js`, `ai.js`, `settings.js`, and `views/` (the sidebar and each page) |
+| `js/` | Its code: `app.js` (pages and starting), `fsx.js` (the folder), `library.js` (the notes, their lists, people and boards), `tasks.js` (finding, ticking off and moving list items), `people.js` (`@mentions`), `boards.js` (board files), `mapdata.js` and `canvas.js` (mind maps), `drag.js`, `inline.js`, `editor.js`, `render.js` (reading), `search.js`, `templates.js`, `dictation.js`, `ai.js`, `settings.js`, and `views/` (the sidebar and each page) |
 | `css/` | Its look |
 | `vendor/`, `assets/fonts/` | The libraries it uses (CodeMirror, marked, DOMPurify, Lucide icons) and the Literata typeface, with their licences |
 | `sw.js`, `manifest.webmanifest`, `icons/` | For working offline and installing as an app |
@@ -197,7 +250,7 @@ Your notes are the files in your folder, and nothing else: TimNote keeps no copy
 
 ## How it was tested
 
-`test/unit/` tests the reading of list items (the words anywhere in a line, headings and bullets, checkboxes, capitals, code left alone, dates such as *by Friday* counted from the note's date, people and tags) and ticking them off in the text. `test/e2e.mjs` and `test/e2e-features.mjs` run TimNote in Chrome (with the browser's private storage standing in for a folder) through making notes from templates, typing, saving, renaming through the title, ticking off on the To do list and seeing the file change, adding from a list, reading view, search, the calendar, Ctrl+K, a note changed on another computer, a note changed in two places at once, plain-text notes, pasted pictures, `@` dates and `[[` links, templates, pinning, archiving and deleting, unsaved typing offered back after a crash, a narrow window, and the AI against stand-ins for Gemini and Claude that check what is sent.
+`test/unit/` tests the reading of list items (the words anywhere in a line, headings and bullets, checkboxes, capitals, code left alone, dates such as *by Friday* counted from the note's date, people and tags), ticking them off and moving them to another list in the text, `@mentions`, reading and writing board files (and each change to a board, made again on a newer version of the file), and turning a note into a mind map and laying it out without overlaps. `test/e2e-boards.mjs` runs `@people` and the Tags page, notes and lists as mind maps (dragging a card, its layout kept, ticking a card, renaming the note), the lists as cards (ticking, adding, dragging an item to another list and Undo), and boards (dragging items and notes on from the tray and the sidebar, typing and moving cards, a board changed on another computer, renaming and deleting). `test/e2e.mjs` and `test/e2e-features.mjs` run TimNote in Chrome (with the browser's private storage standing in for a folder) through making notes from templates, typing, saving, renaming through the title, ticking off on the To do list and seeing the file change, adding from a list, reading view, search, the calendar, Ctrl+K, a note changed on another computer, a note changed in two places at once, plain-text notes, pasted pictures, `@` dates and `[[` links, templates, pinning, archiving and deleting, unsaved typing offered back after a crash, a narrow window, and the AI against stand-ins for Gemini and Claude that check what is sent.
 
 The AI was tested only against those stand-ins, so the first time, press **Test** in Settings → The AI. If a service retires a model, choose another there.
 

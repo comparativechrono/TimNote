@@ -45,7 +45,9 @@ const ICONS = (
   'folder-input file-text file-plus check x chevron-left chevron-right chevron-down list-checks lightbulb circle-help message-circle-question ' +
   'scale sun moon monitor menu book-open pencil copy download printer mail refresh-cw external-link triangle-alert user hash ' +
   'corner-down-left send square square-check circle-check clock history house keyboard cloud hard-drive link image wand-sparkles ' +
-  'list info highlighter eye key-round save files inbox reply hourglass star notebook-pen bell arrow-left type text-quote columns-2 messages-square'
+  'list info highlighter eye key-round save files inbox reply hourglass star notebook-pen bell arrow-left type text-quote columns-2 messages-square ' +
+  'layout-grid at-sign users network zoom-in zoom-out scan eye-off tag grip-vertical panel-right-open panel-right-close undo-2 ' +
+  'circle-plus arrow-right-left columns-3 square-kanban'
 ).split(/\s+/);
 const icons = {};
 for (const name of ICONS) {
