@@ -1,0 +1,18 @@
+# GitHub Pages serves the gh-pages branch. This keeps it the same as main, so that anything pushed to main is
+# published (a minute or two later) at https://comparativechrono.github.io/TimNote/
+name: Publish
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+permissions:
+  contents: write
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Make gh-pages the same as main
+        run: git push --force origin HEAD:refs/heads/gh-pages
