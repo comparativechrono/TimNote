@@ -16,7 +16,7 @@
    It isn't synced and can't be seen in a file manager.
    ===================================================================== */
 import { idbGet, idbSet, idbDel } from './idb.js';
-import { splitPath, isNoteFile } from './notes.js';
+import { splitPath, isNoteFile, decodeBytes } from './notes.js';
 
 export class ConflictError extends Error {
   constructor(path, mtime) {
@@ -251,12 +251,26 @@ async function pool(items, n, fn) {
   await Promise.all(Array.from({ length: Math.min(n, items.length) }, run));
 }
 
-/** → {raw, mtime, size} */
+/** → {raw, utf8, mtime, size} (raw: the text, with a byte-order mark if the file has one; utf8: false if the file
+    isn't UTF-8 text, when it must not be written back) */
 export async function read(path) {
   return retry(async () => {
     const f = await (await fileHandle(path)).getFile();
-    return { raw: await f.text(), mtime: f.lastModified, size: f.size };
+    const d = decodeBytes(await f.arrayBuffer());
+    return { raw: d.raw, utf8: d.utf8, mtime: f.lastModified, size: f.size };
   });
+}
+/* one change to a file at a time: exclusive(path, fn) runs fn after any earlier one for the same file has finished
+   (so that, say, two items ticked quickly in one note are both kept) */
+const locks = new Map();
+export function exclusive(path, fn) {
+  const key = String(path).toLowerCase();
+  const prev = locks.get(key) || Promise.resolve();
+  const run = prev.then(fn, fn);
+  const tail = run.catch(() => {});
+  locks.set(key, tail);
+  tail.then(() => locks.get(key) === tail && locks.delete(key));
+  return run;
 }
 export async function readBlob(path) {
   return retry(async () => (await fileHandle(path)).getFile());
@@ -299,7 +313,9 @@ export async function write(path, data, { expect = null, create = false } = {}) 
       throw e;
     }
     const f = await fh.getFile();
-    return { mtime: f.lastModified, size: f.size };
+    const len = typeof data === 'string' ? new TextEncoder().encode(data).length : data instanceof Blob ? data.size : data.byteLength;
+    // (not the size written: changed elsewhere as it was saved. A time stamp of -1 makes the note look again)
+    return { mtime: f.size === len ? f.lastModified : -1, size: f.size };
   });
 }
 /** a new file: stops with an ExistsError if there is one of that name already. → {mtime, size} */
@@ -313,16 +329,19 @@ export async function remove(path) {
     await (await dirHandle(dir)).removeEntry(name);
   });
 }
-/** move or rename a file: the new one is written first, then the old one taken away. → {mtime, size} */
-export async function move(from, to) {
+/** move or rename a file: the new one is written first, then the old one taken away. expect: the time stamp the file
+    had when it was last read or saved (a ConflictError if it has changed since). → {mtime, size} */
+export async function move(from, to, { expect = null } = {}) {
   if (from === to) return stat(from);
   const caseOnly = from.toLowerCase() === to.toLowerCase();
   if (!caseOnly && (await exists(to))) throw new ExistsError(to);
   const blob = await readBlob(from);
+  if (expect != null && blob.lastModified !== expect) throw new ConflictError(from, blob.lastModified);
   const data = await blob.arrayBuffer();
   if (caseOnly) {
     // (on Windows and macOS "a.md" and "A.md" are the same file: go through a third name)
-    const tmp = from + '.renaming';
+    // (a note's name, so that if anything stops it half way the note is still listed, as "… (renaming).md")
+    const tmp = /\.[^./]+$/.test(from) ? from.replace(/(\.[^./]+)$/, ' (renaming)$1') : from + ' (renaming)';
     await write(tmp, data, { create: true });
     await remove(from);
     const r = await write(to, data, { create: true });

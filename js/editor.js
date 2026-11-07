@@ -10,7 +10,7 @@ import {
   EditorView, EditorState, Compartment, StateField, StateEffect, Decoration, ViewPlugin, WidgetType, keymap, placeholder,
   drawSelection, dropCursor, highlightSpecialChars, history, historyKeymap, defaultKeymap, indentWithTab, search, searchKeymap,
   syntaxHighlighting, HighlightStyle, markdown, markdownLanguage, tags, gutter, GutterMarker, autocompletion, completionKeymap,
-  EditorSelection, Prec, Annotation
+  EditorSelection, Prec, Annotation, Transaction
 } from '../vendor/codemirror.js';
 import * as S from './settings.js';
 import { parse, toggleLine, toggleWordOnLine, listItem } from './tasks.js';
@@ -293,6 +293,7 @@ function wrap(mark) {
 export function createEditor(parent, o) {
   const lang = new Compartment();
   const ro = new Compartment();
+  const trackers = new Set();
   const isMd = !/\.txt$/i.test(o.path || '');
   const view = new EditorView({
     parent,
@@ -301,7 +302,7 @@ export function createEditor(parent, o) {
       extensions: [
         taskField,
         flashField,
-        ro.of(EditorState.readOnly.of(!!o.readOnly)),
+        ro.of([EditorState.readOnly.of(!!o.readOnly), EditorView.editable.of(!o.readOnly)]),
         lang.of(isMd ? markdown({ base: markdownLanguage, codeLanguages: [] }) : []),
         history(),
         drawSelection(),
@@ -421,6 +422,7 @@ export function createEditor(parent, o) {
           }
         }),
         EditorView.updateListener.of((u) => {
+          if (u.docChanged) for (const t of trackers) t.pos = u.changes.mapPos(t.pos, 1);
           if (u.docChanged && !u.transactions.some((t) => t.annotation(external)) && o.onChange) o.onChange();
         })
       ]
@@ -430,6 +432,12 @@ export function createEditor(parent, o) {
 
   let flashTimer = null;
   const api = {
+    /** a place in the text that moves with it as it is typed in: {get(), stop()} */
+    track(pos) {
+      const t = { pos };
+      trackers.add(t);
+      return { get: () => t.pos, stop: () => trackers.delete(t) };
+    },
     view,
     getText: () => view.state.doc.toString(),
     /** the text from the file, put in place of what is there (keeping the cursor where it can) */
@@ -437,10 +445,11 @@ export function createEditor(parent, o) {
       const cur = view.state.doc.toString();
       if (cur === text) return;
       const ch = diff(cur, text);
-      view.dispatch({ changes: ch, annotations: asEdit ? [] : [external.of(true)], userEvent: asEdit ? 'input.replace' : undefined });
+      // (text from the file isn't an edit: Ctrl+Z mustn't take it away again)
+      view.dispatch({ changes: ch, annotations: asEdit ? [] : [external.of(true), Transaction.addToHistory.of(false)], userEvent: asEdit ? 'input.replace' : undefined });
     },
     setBase: (d) => view.dispatch({ effects: setBase.of(d) }),
-    setReadOnly: (yes) => view.dispatch({ effects: ro.reconfigure(EditorState.readOnly.of(!!yes)) }),
+    setReadOnly: (yes) => view.dispatch({ effects: ro.reconfigure([EditorState.readOnly.of(!!yes), EditorView.editable.of(!yes)]) }),
     refresh: () => view.dispatch({ effects: refresh.of(true) }),
     focus: () => view.focus(),
     hasFocus: () => view.hasFocus,

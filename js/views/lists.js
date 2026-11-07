@@ -206,14 +206,16 @@ export class ListView {
     const k = it.note.path + '\n' + it.task.raw;
     this.pending.set(k, done);
     li.classList.toggle('done', done);
+    const cb = li.querySelector('input');
+    if (cb) cb.disabled = true; // (until its note is saved)
     try {
-      await lib.toggle(it.note, it.task, done);
-      if (done) toast('Ticked off.', 'ok', 4000, { label: 'Undo', run: () => this.untick(it) });
+      const res = await lib.toggle(it.note, it.task, done);
+      // Undo changes back exactly the line that was changed
+      if (done) toast('Ticked off.', 'ok', 4000, { label: 'Undo', run: () => this.undo(res, it.task.list) });
     } catch (e) {
       li.classList.toggle('done', !done);
-      const cb = li.querySelector('input');
       if (cb) cb.checked = !done;
-      toast(e.name === 'ConflictError' ? 'The note was changed elsewhere just then: try again.' : e.message, 'bad', 8000);
+      toast(e.name === 'ConflictError' ? 'The note was changed elsewhere just then: try again.' : e.message, 'bad', 9000);
     } finally {
       setTimeout(() => {
         this.pending.delete(k);
@@ -221,15 +223,13 @@ export class ListView {
       }, 600);
     }
   }
-  async untick(it) {
-    // (the item as it is now, ticked)
-    const n = lib.get(it.note.path);
-    const t = n && n.tasks.find((x) => x.line === it.task.line && x.list === it.task.list);
-    if (!t) return toast('The note has changed: open it to undo that.', 'warn');
+  async undo(res, list) {
+    const n = res && lib.get(res.note.path);
+    if (!n || res.line == null) return toast('The note has changed: open it to undo that.', 'warn');
     try {
-      await lib.toggle(n, t, false);
+      await lib.toggle(n, { line: res.line, raw: res.raw, list }, false);
     } catch (e) {
-      toast(e.message, 'bad');
+      toast(e.message, 'bad', 8000);
     }
   }
 

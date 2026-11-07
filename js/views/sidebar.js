@@ -44,17 +44,7 @@ export class Sidebar {
         { label: 'Choose another folder…', icon: 'folder-open', onClick: () => app.changeFolder() },
         recent.length ? '-' : null,
         recent.length ? { heading: 'Recent folders' } : null,
-        ...recent.map((r) => ({
-          label: r.name,
-          icon: 'folder',
-          onClick: async () => {
-            if (await fsx.openRecent(r)) {
-              lib.notes.clear();
-              await app.connect();
-              app.navigate('#/', { replace: true });
-            }
-          }
-        })),
+        ...recent.map((r) => ({ label: r.name, icon: 'folder', onClick: () => app.switchFolder(() => fsx.openRecent(r)) })),
         '-',
         { label: 'Settings', icon: 'settings', onClick: () => app.settings() }
       ]);

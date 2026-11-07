@@ -5,7 +5,7 @@
      #/new/<template>     a new note       #/calendar/<y-m>   the calendar
      #/today              today's note     #/search/<words>   search
    ===================================================================== */
-import { h, toast, keyLabel, dialogOpen, modal, btn } from './util.js';
+import { h, toast, keyLabel, dialogOpen, modal, btn, confirmDialog } from './util.js';
 import * as fsx from './fsx.js';
 import * as lib from './library.js';
 import * as S from './settings.js';
@@ -79,17 +79,28 @@ export const app = {
       document.body.classList.remove('loading');
     }
   },
-  async changeFolder() {
-    if (!(await leaveView())) return;
+  changeFolder: () => app.switchFolder(() => fsx.pick()),
+  /** open another folder (choose(): asks for it, → true if one was opened): the page open now is saved and closed
+      first, so that nothing of this folder is saved into the other */
+  async switchFolder(choose) {
+    if (!(await leaveView())) return false;
+    if (app.view && app.view.destroy) app.view.destroy();
+    app.view = null;
+    document.getElementById('main').replaceChildren();
+    let ok = false;
     try {
-      if (!(await fsx.pick())) return;
+      ok = await choose();
     } catch (e) {
       toast('The folder couldn’t be opened: ' + e.message, 'bad', 8000);
-      return;
+    }
+    if (!ok) {
+      route();
+      return false;
     }
     lib.notes.clear();
     await app.connect();
     app.navigate('#/', { replace: true });
+    return true;
   }
 };
 
@@ -121,6 +132,7 @@ async function route() {
   }
   if (!(await leaveView())) {
     if (app.view && app.view.hash) history.replaceState(null, '', app.view.hash());
+    app.pendingRestore = null;
     return;
   }
   if (my !== seq) return;
@@ -200,16 +212,23 @@ function recoveryDialog(list) {
       'li.rec-row',
       h('div', h('b', name), h('div.hint', `${new Date(r.at).toLocaleString('en-GB')}${n && n.mtime > (r.base || 0) ? ' — the file has changed since' : ''}`)),
       btn('Copy text', 'copy', () => navigator.clipboard.writeText(r.text).then(() => toast('Copied.', 'ok')), 'btn small'),
-      btn('Restore', 'history', async () => {
-        m.close();
-        if (n) {
-          app.openNote(n.path);
-          setTimeout(() => app.view && app.view.restoreText && app.view.restoreText(r.text), 300);
-        } else {
-          app.newNote('Blank', { title: r.title || '' });
-          setTimeout(() => app.view && app.view.restoreText && app.view.restoreText(r.text), 300);
+      btn('As a new note', 'file-plus', async () => {
+        try {
+          const made = await lib.createNote({ folder: n ? n.dir : '', date: todayIso(), title: `${name} (recovered)`, text: r.text });
+          rec.clear(r.id);
+          row.remove();
+          toast('Saved as a new note, beside the original.', 'ok', 5000, { label: 'Open it', run: () => app.openNote(made.path) });
+        } catch (e) {
+          toast(e.message, 'bad');
         }
-        rec.clear(r.id);
+      }, 'btn small'),
+      btn('Restore', 'history', async () => {
+        if (n && n.mtime > (r.base || 0) && !(await confirmDialog('The note has changed since', 'Its file has been saved since this was typed (perhaps on another computer). Restoring puts this text in place of what is there now (Ctrl+Z undoes it). Or keep both: choose “As a new note”.', 'Restore'))) return;
+        m.close();
+        // (the note applies it when it opens; the copy goes once it is saved)
+        app.pendingRestore = { path: n ? n.path : null, text: r.text, id: r.id };
+        if (n) app.openNote(n.path);
+        else app.newNote('Blank', { title: r.title || '' });
       }, 'btn small primary'),
       btn('Discard', 'trash-2', () => {
         rec.clear(r.id);

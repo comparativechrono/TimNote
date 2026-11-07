@@ -77,6 +77,7 @@ export class NoteView {
         this.mtime = n.mtime;
         this.eol = n.eol;
         this.bom = n.bom;
+        this.notUtf8 = n.utf8 === false;
       } else this.needsLoad = true; // (a template, or a file not read yet: read it when the page is shown)
       this.isTemplate = lib.isTemplate(path);
       this.recId = path;
@@ -161,7 +162,7 @@ export class NoteView {
     this.el = h('section.note-view', this.head, this.banner, this.body, this.foot);
 
     this.ed = createEditor(this.editorHost, {
-      readOnly: !!this.needsLoad,
+      readOnly: !!(this.needsLoad || this.notUtf8),
       doc: text,
       path: this.path || 'x.' + (this.draft ? this.draft.ext : 'md'),
       base: this.date,
@@ -235,6 +236,7 @@ export class NoteView {
         } else this.titleEl.select();
       }
       this.status('draft');
+      this.restorePending();
     } else {
       if (this.needsLoad) return this.load();
       if (this.startLine != null) this.ed.goToLine(this.startLine);
@@ -243,28 +245,50 @@ export class NoteView {
         this.ed.focus();
       } else this.ed.focus();
       this.status('saved');
+      if (this.notUtf8) this.showNotUtf8();
+      this.restorePending();
       this.checkDisk();
     }
   }
 
   async load() {
     try {
-      const { raw, mtime } = await fsx.read(this.path);
+      const { raw, utf8, mtime } = await fsx.read(this.path);
       const d = decodeText(raw);
       this.ed.setText(d.text);
       this.mtime = mtime;
       this.eol = d.eol;
       this.bom = d.bom;
       this.needsLoad = false;
-      this.ed.setReadOnly(false);
+      this.notUtf8 = !utf8;
+      this.ed.setReadOnly(this.notUtf8);
       this.renderFoot();
       if (this.startLine != null) this.ed.goToLine(this.startLine);
       this.ed.focus();
       this.status('saved');
+      if (this.notUtf8) this.showNotUtf8();
+      this.restorePending();
     } catch (e) {
       this.status('error', 'the file couldn’t be read');
       toast('The file couldn’t be read: ' + e.message, 'bad');
     }
+  }
+
+  /** text brought back from the browser's copy (unsaved typing from before), if it was meant for this note */
+  restorePending() {
+    const p = app.pendingRestore;
+    if (!p || this.notUtf8) return;
+    if (p.path ? p.path !== this.path : !this.draft) return;
+    app.pendingRestore = null;
+    if (this.draft) this.recId = p.id; // (so that the copy goes once this note is saved)
+    this.ed.setText(p.text, { asEdit: true });
+    toast('Restored. Press Ctrl+Z to undo it.', 'ok');
+  }
+  showNotUtf8() {
+    const b = this.banner;
+    b.hidden = false;
+    b.className = 'note-banner warn';
+    b.replaceChildren(iconEl('triangle-alert'), h('div.banner-text', h('b', 'This file isn’t UTF-8 text, so TimNote shows it but won’t change it.'), h('span', ' Saving it could spoil its accented letters and symbols. To edit it here, open it in Notepad, choose Save as, and set Encoding to UTF-8.')));
   }
 
   renderHead() {
@@ -349,6 +373,8 @@ export class NoteView {
 
   async saveOnce() {
     if (!this.dirty || this.conflict) return;
+    if (this.moving) return; // (being renamed or moved: saved to its new place afterwards)
+    if (this.notUtf8) return this.status('error', 'the file isn’t UTF-8, so it isn’t changed');
     // (never save a note whose file hasn't been read: what is shown isn't what is in it)
     if (this.needsLoad) return this.status('error', 'the file hasn’t been read yet');
     const text = this.ed.getText();
@@ -373,9 +399,10 @@ export class NoteView {
         this.renderHead();
         if (!this.destroyed && app.sidebar) app.sidebar.setActive({ name: 'note', arg: n.path });
       } else {
-        const r = await fsx.write(this.path, encodeText(text, this.eol, this.bom), { expect: this.mtime });
+        const path = this.path;
+        const r = await fsx.exclusive(path, () => fsx.write(path, encodeText(text, this.eol, this.bom), { expect: this.mtime }));
         this.mtime = r.mtime;
-        lib.update(this.path, text, r.mtime, r.size, { eol: this.eol, bom: this.bom });
+        lib.update(path, text, r.mtime, r.size, { eol: this.eol, bom: this.bom });
       }
       if (this.version === v) {
         this.dirty = false;
@@ -405,15 +432,29 @@ export class NoteView {
 
   /** the file, looked at again: changed elsewhere? (it shows the new version, or asks if there are changes here too) */
   async checkDisk() {
-    if (!this.path || this.draft || this.saving || this.conflict || this.destroyed || this.checking) return;
+    if (!this.path || this.draft || this.saving || this.conflict || this.destroyed || this.checking || this.moving || this.needsLoad) return;
     this.checking = true;
     try {
       const st = await fsx.stat(this.path);
       if (!st) return this.showMissing();
+      if (this.missing) {
+        // (the file is back: compare it with what is here)
+        this.missing = false;
+        this.banner.hidden = true;
+        this.mtime = null;
+      }
       if (st.mtime === this.mtime) return;
       const disk = await fsx.read(this.path);
       const d = decodeText(disk.raw);
-      if (this.saving) return;
+      if (this.saving || this.moving) return;
+      if (!disk.utf8) {
+        if (this.dirty) return this.showConflict(disk);
+        this.ed.setText(d.text);
+        this.mtime = disk.mtime;
+        this.notUtf8 = true;
+        this.ed.setReadOnly(true);
+        return this.showNotUtf8();
+      }
       if (d.text === this.ed.getText()) {
         this.mtime = disk.mtime;
         return;
@@ -463,10 +504,11 @@ export class NoteView {
     this.conflict = null;
     try {
       if (choice === 'mine') {
-        const st = await fsx.stat(this.path);
-        this.mtime = st ? st.mtime : null;
-        this.dirty = true;
+        // (over the version that was shown: if a newer one has come since, it asks again)
+        const st = disk && disk.mtime != null ? { mtime: disk.mtime } : await fsx.stat(this.path);
         if (!st) return this.showMissing();
+        this.mtime = st.mtime;
+        this.dirty = true;
         await this.save({ now: true });
       } else if (choice === 'theirs' && theirs) {
         this.ed.setText(theirs.text);
@@ -517,7 +559,7 @@ export class NoteView {
         'div.banner-actions',
         btn('Save it again', 'save', async () => {
           try {
-            const r = await fsx.write(this.path, encodeText(this.ed.getText(), this.eol, this.bom), { create: true });
+            const r = await fsx.exclusive(this.path, () => fsx.create(this.path, encodeText(this.ed.getText(), this.eol, this.bom)));
             this.mtime = r.mtime;
             this.missing = false;
             this.dirty = false;
@@ -526,6 +568,12 @@ export class NoteView {
             rec.clear(this.recId);
             this.status('saved');
           } catch (e) {
+            if (e.name === 'ExistsError') {
+              // (it has come back meanwhile: which version to keep?)
+              this.missing = false;
+              const disk = await fsx.read(this.path).catch(() => null);
+              return this.showConflict(disk);
+            }
             toast('It couldn’t be saved: ' + e.message, 'bad');
           }
         }, 'btn small primary'),
@@ -538,11 +586,7 @@ export class NoteView {
     );
   }
 
-  /** text brought back from the browser's copy (unsaved changes from before) */
-  restoreText(text) {
-    this.ed.setText(text, { asEdit: true });
-    toast('Restored. Press Ctrl+Z to undo it.', 'ok');
-  }
+
 
   /* ---------------- the title and the date (the file's name) ---------------- */
   titleTyped() {
@@ -601,8 +645,9 @@ export class NoteView {
       this.renderHead();
       return;
     }
+    if (this.notUtf8) return toast('This file isn’t UTF-8 text, so TimNote doesn’t change it (or its name).', 'warn', 6000);
     await this.save({ now: true });
-    if (this.dirty) return toast('The note has to be saved before its file can be renamed.', 'warn');
+    if (this.dirty || this.conflict) return toast('The note has to be saved before its file can be renamed.', 'warn');
     const n = lib.get(this.path);
     const ext = (n && n.ext) || 'md';
     const name = fileName(date, title, ext);
@@ -614,12 +659,14 @@ export class NoteView {
       to = freeName(dir, name, taken);
     }
     if (to === from) return;
+    // (while the file moves, nothing is saved: what is typed meanwhile is saved to the new place afterwards)
+    this.moving = true;
     try {
       if (dir) await fsx.ensureFolder(dir);
       let r = null;
       for (let tries = 0; !r; tries++) {
         try {
-          r = await fsx.move(from, to);
+          r = await fsx.exclusive(from, () => fsx.move(from, to, { expect: this.mtime }));
         } catch (e) {
           // (a file of that name that hasn't been read yet: the next free name)
           if (e.name !== 'ExistsError' || tries > 20) throw e;
@@ -639,13 +686,21 @@ export class NoteView {
         S.device.lastPath = to;
         S.saveDevice();
       }
-      history.replaceState(null, '', app.noteHash(to));
+      if (!this.destroyed && app.view === this) history.replaceState(null, '', app.noteHash(to));
       this.ed.setBase(date);
       this.renderHead();
-      app.sidebar.setActive({ name: 'note', arg: to });
+      if (!this.destroyed) app.sidebar.setActive({ name: 'note', arg: to });
     } catch (e) {
       this.titleEl.value = this.title;
-      toast('The file couldn’t be renamed: ' + e.message, 'bad', 8000);
+      if (e.name === 'ConflictError') {
+        // (changed elsewhere since it was last seen here: shown first, and not renamed)
+        this.moving = false;
+        toast('The note had been changed elsewhere, so its file wasn’t renamed. Have a look, then rename it again if you still want to.', 'warn', 9000);
+        await this.checkDisk();
+      } else toast('The file couldn’t be renamed: ' + e.message, 'bad', 8000);
+    } finally {
+      this.moving = false;
+      if (this.dirty) this.save();
     }
   }
   changeDate() {
@@ -754,26 +809,38 @@ export class NoteView {
 
   /* ---------------- pictures pasted in ---------------- */
   async pasteFiles(files, pos) {
+    if (this.notUtf8) return;
     const folder = S.shared.attachmentsFolder || 'attachments';
-    const stamp = `${this.date} ${timeHM().replace(':', '')}`;
+    const now = new Date();
+    const stamp = `${this.date} ${timeHM(now).replace(':', '')}${String(now.getSeconds()).padStart(2, '0')}`;
+    const base = cleanTitle(this.title || 'picture').slice(0, 40) || 'picture';
+    // (the link goes where the picture was pasted, wherever that is by the time its file is saved)
+    const at = this.ed.track(pos);
     let text = '';
-    for (let i = 0; i < files.length; i++) {
-      const f = files[i];
-      const ext = (f.type.split('/')[1] || 'png').replace('jpeg', 'jpg').replace(/[^a-z0-9]/g, '');
-      const base = cleanTitle(this.title || 'picture').slice(0, 40);
-      const taken = new Set();
-      let path = joinPath(folder, `${stamp} ${base}${files.length > 1 ? ' ' + (i + 1) : ''}.${ext}`);
-      let k = 2;
-      while ((await fsx.exists(path)) || taken.has(path)) path = joinPath(folder, `${stamp} ${base} (${k++}).${ext}`);
-      try {
-        await fsx.write(path, f, { create: true });
+    try {
+      for (let i = 0; i < files.length; i++) {
+        const f = files[i];
+        const ext = (f.type.split('/')[1] || 'png').replace('jpeg', 'jpg').replace(/[^a-z0-9]/g, '') || 'png';
+        let path = null;
+        for (let k = 1; !path && k < 50; k++) {
+          const cand = joinPath(folder, `${stamp} ${base}${files.length > 1 ? ' ' + (i + 1) : ''}${k > 1 ? ` (${k})` : ''}.${ext}`);
+          try {
+            await fsx.create(cand, f);
+            path = cand;
+          } catch (e) {
+            if (e.name !== 'ExistsError') throw e;
+          }
+        }
+        if (!path) continue;
         const rel = relPath(this.dir, path).split('/').map(encodeURIComponent).join('/');
         text += `![${base}](${rel})\n`;
-      } catch (e) {
-        toast('The picture couldn’t be saved: ' + e.message, 'bad');
       }
+    } catch (e) {
+      toast('The picture couldn’t be saved: ' + e.message, 'bad');
     }
-    if (text) {
+    pos = at.get();
+    at.stop();
+    if (text && !this.destroyed) {
       // (a picture goes on a line of its own)
       const before = this.ed.view.state.sliceDoc(Math.max(0, pos - 1), pos);
       const after = this.ed.view.state.sliceDoc(pos, pos + 1);
@@ -936,9 +1003,14 @@ export class NoteView {
   async leave() {
     if (this.titleEl === document.activeElement) await this.commitTitle();
     if (dict.active()) dict.stop();
+    // (nothing typed from now on could be saved, so nothing can be typed)
+    this.ed.setReadOnly(true);
     await this.save({ now: true });
-    if (this.dirty && !this.draft) {
-      return confirmDialog('This note isn’t saved', 'It couldn’t be saved to the folder just now. What you typed is kept in this browser and will be offered back next time. Leave it anyway?', 'Leave');
+    const untouchedDraft = this.draft && this.ed.getText() === this.pristine && !this.titleTouched;
+    if (this.dirty && !untouchedDraft) {
+      const ok = await confirmDialog('This note isn’t saved', 'It couldn’t be saved to the folder just now. What you typed is kept in this browser and will be offered back next time. Leave it anyway?', 'Leave');
+      if (!ok) this.ed.setReadOnly(!!(this.needsLoad || this.notUtf8));
+      return ok;
     }
     return true;
   }

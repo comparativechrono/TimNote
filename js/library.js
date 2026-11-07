@@ -9,8 +9,8 @@
    ===================================================================== */
 import * as fsx from './fsx.js';
 import * as S from './settings.js';
-import { parse, toggleInText, newItemLine } from './tasks.js';
-import { parseName, splitPath, joinPath, decodeText, encodeText, isConflictCopy, fileName, freeName, cleanFolder } from './notes.js';
+import { parse, toggleAt, newItemLine } from './tasks.js';
+import { parseName, splitPath, joinPath, decodeText, decodeBytes, encodeText, isConflictCopy, fileName, freeName, cleanFolder } from './notes.js';
 import { BUILTIN, parseTemplate, templateFile, fill } from './templates.js';
 import { iso, todayIso } from './dates.js';
 import { emit } from './bus.js';
@@ -22,17 +22,20 @@ export let truncated = false;
 export const hooks = { applyToOpen: null, isDirty: null };
 let ready = false;
 let scanning = null;
+// (when each note was last changed here: a scan that began before then has an older picture of it)
+const touched = new Map();
+const touch = (p) => touched.set(p, Date.now());
 let sharedStamp = null;
 
 export const isReady = () => ready;
 export const fold = (s) => String(s || '').normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase();
 
 /* ---------------- one note ---------------- */
-function make(path, raw, mtime, size) {
+function make(path, raw, mtime, size, utf8 = true) {
   const { dir, name } = splitPath(path);
   const pn = parseName(name);
   const d = decodeText(raw);
-  const n = { path, dir, name, ext: pn.ext, title: pn.title || (pn.date ? 'Untitled' : name), date: pn.date || iso(new Date(mtime || Date.now())), dated: !!pn.date, mtime, size, text: d.text, eol: d.eol, bom: d.bom };
+  const n = { path, dir, name, ext: pn.ext, title: pn.title || (pn.date ? 'Untitled' : name), date: pn.date || iso(new Date(mtime || Date.now())), dated: !!pn.date, mtime, size, text: d.text, eol: d.eol, bom: d.bom, utf8 };
   classify(n);
   index(n);
   return n;
@@ -67,7 +70,9 @@ const isTemplatePath = (p) => {
 export function scan() {
   if (scanning) return scanning;
   scanning = (async () => {
+    const began = Date.now();
     const res = await fsx.scan();
+    const fresh = (p) => (touched.get(p) || 0) >= began;
     truncated = res.truncated;
     folders = res.dirs;
     const seen = new Set();
@@ -82,6 +87,7 @@ export function scan() {
       seen.add(f.path);
       const old = notes.get(f.path);
       if (old && old.mtime === f.mtime && old.size === f.size) continue;
+      if (fresh(f.path)) continue; // (saved here since the scan began: this copy is newer)
       toRead.push(f);
     }
     let i = 0;
@@ -90,9 +96,10 @@ export function scan() {
         while (i < toRead.length) {
           const f = toRead[i++];
           try {
-            const raw = await f.file.text();
+            const d = decodeBytes(await f.file.arrayBuffer());
+            if (fresh(f.path)) continue;
             const had = notes.has(f.path);
-            notes.set(f.path, make(f.path, raw, f.mtime, f.size));
+            notes.set(f.path, make(f.path, d.raw, f.mtime, f.size, d.utf8));
             if (had) changed.push(f.path);
           } catch (e) {
             /* (being written as we read: next time) */
@@ -103,7 +110,7 @@ export function scan() {
     );
     const gone = [];
     for (const p of Array.from(notes.keys())) {
-      if (!seen.has(p)) {
+      if (!seen.has(p) && !fresh(p)) {
         notes.delete(p);
         gone.push(p);
       }
@@ -122,8 +129,7 @@ async function readTemplates(files) {
   const out = [];
   for (const f of files) {
     try {
-      const raw = await f.file.text();
-      const t = parseTemplate(decodeText(raw).text);
+      const t = parseTemplate(decodeText(decodeBytes(await f.file.arrayBuffer()).raw).text);
       const { name } = splitPath(f.path);
       out.push({ name: name.replace(/\.(md|markdown|txt)$/i, ''), path: f.path, folder: t.folder, title: t.title, format: t.format || (/\.txt$/i.test(name) ? 'txt' : ''), body: t.body, builtin: false });
     } catch (e) {
@@ -163,18 +169,21 @@ export function template(name) {
 
 /* ---------------- the shared settings file ---------------- */
 const SETTINGS = '.timnote/settings.json';
+let sharedBase = '{}'; // (the settings as last read from or written to the folder: what changed here is what differs)
 export async function loadShared() {
   try {
     const st = await fsx.stat(SETTINGS);
     if (!st) {
       S.loadShared({});
       sharedStamp = null;
+      sharedBase = JSON.stringify(S.shared);
       return;
     }
     if (st.mtime === sharedStamp) return false;
     const { raw, mtime } = await fsx.read(SETTINGS);
-    S.loadShared(JSON.parse(raw));
+    S.loadShared(JSON.parse(raw.replace(/^\ufeff/, '')));
     sharedStamp = mtime;
+    sharedBase = JSON.stringify(S.shared);
     return true;
   } catch (e) {
     console.warn('[TimNote] settings', e);
@@ -182,16 +191,40 @@ export async function loadShared() {
     return false;
   }
 }
+/** theirs, with what was changed here (since the file was last read) put on top: key by key, and inside "ai" */
+export function mergeShared(base, mine, theirs) {
+  const out = Object.assign({}, theirs);
+  for (const k of Object.keys(mine)) {
+    const a = mine[k], b = base ? base[k] : undefined;
+    if (k === 'ai' && a && typeof a === 'object') {
+      out.ai = Object.assign({}, (theirs && theirs.ai) || {});
+      for (const j of Object.keys(a)) if (JSON.stringify(a[j]) !== JSON.stringify(b && b[j])) out.ai[j] = a[j];
+    } else if (JSON.stringify(a) !== JSON.stringify(b)) out[k] = a;
+    else if (!(k in out)) out[k] = a;
+  }
+  return out;
+}
 let saveTimer = null;
 export function saveShared() {
   clearTimeout(saveTimer);
-  saveTimer = setTimeout(async () => {
-    try {
-      const r = await fsx.write(SETTINGS, JSON.stringify(S.shared, null, 2) + '\n', { create: true });
+  saveTimer = setTimeout(() => {
+    fsx.exclusive(SETTINGS, async () => {
+      const text = () => JSON.stringify(S.shared, null, 2) + '\n';
+      let r;
+      try {
+        r = sharedStamp == null ? await fsx.create(SETTINGS, text()) : await fsx.write(SETTINGS, text(), { expect: sharedStamp });
+      } catch (e) {
+        if (e.name !== 'ConflictError' && e.name !== 'ExistsError') throw e;
+        // (changed on another computer meanwhile: theirs, with this computer's changes on top)
+        const { raw, mtime } = await fsx.read(SETTINGS);
+        const merged = mergeShared(JSON.parse(sharedBase), JSON.parse(JSON.stringify(S.shared)), JSON.parse(raw.replace(/^\ufeff/, '')));
+        S.loadShared(merged);
+        reindex();
+        r = await fsx.write(SETTINGS, text(), { expect: mtime });
+      }
       sharedStamp = r.mtime;
-    } catch (e) {
-      emit('error', { message: 'The settings couldn’t be saved to the notes folder: ' + e.message });
-    }
+      sharedBase = JSON.stringify(S.shared);
+    }).catch((e) => emit('error', { message: 'The settings couldn’t be saved to the notes folder: ' + e.message }));
   }, 600);
 }
 
@@ -273,17 +306,20 @@ export function update(path, text, mtime, size, extra = {}) {
   n.text = text;
   n.mtime = mtime;
   n.size = size;
+  n.utf8 = true;
   if (extra.eol) n.eol = extra.eol;
   if (extra.bom != null) n.bom = extra.bom;
   classify(n);
   index(n);
   notes.set(path, n);
+  touch(path);
   emit('notes', { changed: [path], local: true });
   return n;
 }
 export function added(path, text, mtime, size) {
   const n = make(path, text, mtime, size);
   notes.set(path, n);
+  touch(path);
   const { dir } = splitPath(path);
   if (dir && !folders.includes(dir)) {
     const parts = dir.split('/');
@@ -298,6 +334,7 @@ export function added(path, text, mtime, size) {
 }
 export function removed(path) {
   notes.delete(path);
+  touch(path);
   const i = S.shared.pinned.indexOf(path);
   if (i >= 0) {
     S.shared.pinned.splice(i, 1);
@@ -308,6 +345,7 @@ export function removed(path) {
 export function moved(from, to, mtime) {
   const n = notes.get(from);
   notes.delete(from);
+  touch(from);
   if (n) added(to, encodeText(n.text, n.eol, n.bom), mtime, n.size);
   const i = S.shared.pinned.indexOf(from);
   if (i >= 0) {
@@ -361,12 +399,16 @@ export async function addItem(list, text, due) {
   const line = newItemLine(list, text, due);
   const apply = (t) => insertLine(t, line);
   if (hooks.applyToOpen && (await hooks.applyToOpen(note.path, apply))) return note;
-  const { raw, mtime } = await fsx.read(note.path);
-  const d = decodeText(raw);
-  const next = apply(d.text);
-  const r = await fsx.write(note.path, encodeText(next, d.eol, d.bom), { expect: mtime });
-  return update(note.path, next, r.mtime, r.size, { eol: d.eol, bom: d.bom });
+  return fsx.exclusive(note.path, async () => {
+    const { raw, utf8, mtime } = await fsx.read(note.path);
+    if (!utf8) throw new Error(notUtf8);
+    const d = decodeText(raw);
+    const next = apply(d.text);
+    const r = await fsx.write(note.path, encodeText(next, d.eol, d.bom), { expect: mtime });
+    return update(note.path, next, r.mtime, r.size, { eol: d.eol, bom: d.bom });
+  });
 }
+export const notUtf8 = 'This note’s file isn’t UTF-8 text (it may have been saved by Notepad as “ANSI”), so TimNote won’t change it: that could spoil its accented letters and symbols. Open it in Notepad, choose Save as, and set Encoding to UTF-8.';
 export function insertLine(text, line) {
   const lines = text.split('\n');
   const h = lines.findIndex((l) => /^#{1,6}\s+(plan|to ?do|tasks|inbox)\b/i.test(l));
@@ -394,18 +436,26 @@ export function insertLine(text, line) {
 }
 
 /* ---------------- ticking items off from a list ---------------- */
-/** tick an item off (done = true) or not, in its note's file. → the note */
+/** tick an item off (done = true) or not, in its note's file. → {note, line, raw}: the line changed, as it is now
+    (to undo exactly that) */
 export async function toggle(note, task, done) {
+  let at = null;
   const fn = (text) => {
-    const next = toggleInText(text, task, done, S.lists(), note.date);
-    if (next == null) throw new Error('That line has changed since the list was made. Open the note to tick it off there.');
-    return next;
+    const r = toggleAt(text, task, done, S.lists(), note.date);
+    if (!r) throw new Error('That line has changed since the list was made. Open the note to tick it off there.');
+    at = r;
+    return r.text;
   };
-  if (hooks.applyToOpen && (await hooks.applyToOpen(note.path, fn))) return note;
-  const { raw, mtime } = await fsx.read(note.path);
-  const d = decodeText(raw);
-  const next = fn(d.text);
-  if (next === d.text) return note;
-  const r = await fsx.write(note.path, encodeText(next, d.eol, d.bom), { expect: mtime });
-  return update(note.path, next, r.mtime, r.size, { eol: d.eol, bom: d.bom });
+  if (hooks.applyToOpen && (await hooks.applyToOpen(note.path, fn))) return { note, line: at && at.line, raw: at && at.raw };
+  return fsx.exclusive(note.path, async () => {
+    const { raw, utf8, mtime } = await fsx.read(note.path);
+    if (!utf8) throw new Error(notUtf8);
+    const d = decodeText(raw);
+    const next = fn(d.text);
+    if (next !== d.text) {
+      const r = await fsx.write(note.path, encodeText(next, d.eol, d.bom), { expect: mtime });
+      note = update(note.path, next, r.mtime, r.size, { eol: d.eol, bom: d.bom }) || note;
+    }
+    return { note, line: at.line, raw: at.raw };
+  });
 }

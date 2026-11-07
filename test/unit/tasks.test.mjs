@@ -179,3 +179,16 @@ test('toggleLine on its own', () => {
   const t = one('Spoke to Sam. TO DO: book');
   assert.equal(toggleLine('Spoke to Sam. TO DO: book', t, true, C), 'Spoke to Sam. DONE: book');
 });
+
+test('a moved line is found again only if no other line is exactly like it', async () => {
+  const { toggleAt } = await import('../../js/tasks.js');
+  const t = P('## Monday\n- [ ] call Sam\n## Tuesday\n- [ ] call Sam')[1];
+  // (Tuesday's item, at line 3; then a line is added at the top, so it has moved, and there are two like it)
+  const moved = 'new line\n## Monday\n- [ ] call Sam\n## Tuesday\n- [ ] call Sam';
+  assert.equal(toggleAt(moved, t, true, C), null);
+  // (where it was, it is still found exactly)
+  const r = toggleAt('## Monday\n- [ ] call Sam\n## Tuesday\n- [ ] call Sam', t, true, C);
+  assert.equal(r.line, 3);
+  assert.equal(r.text, '## Monday\n- [ ] call Sam\n## Tuesday\n- [x] call Sam');
+  assert.equal(r.raw, '- [x] call Sam');
+});

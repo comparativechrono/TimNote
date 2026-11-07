@@ -20,7 +20,7 @@ await build({
   stdin: {
     contents: [
       // (only what js/editor.js uses: add a name here if the editor needs more)
-      "export { EditorState, Compartment, StateField, StateEffect, EditorSelection, Prec, Annotation } from '@codemirror/state';",
+      "export { EditorState, Compartment, StateField, StateEffect, EditorSelection, Prec, Annotation, Transaction } from '@codemirror/state';",
       "export { EditorView, Decoration, ViewPlugin, WidgetType, keymap, placeholder, drawSelection, dropCursor, highlightSpecialChars, gutter, GutterMarker } from '@codemirror/view';",
       "export { history, historyKeymap, defaultKeymap, indentWithTab } from '@codemirror/commands';",
       "export { syntaxHighlighting, HighlightStyle } from '@codemirror/language';",

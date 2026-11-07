@@ -283,21 +283,28 @@ export function toggleLine(line, task, done, C) {
   return out;
 }
 
-/** the whole text with one item ticked off (or not). → new text, or null if the item isn't where it was (the note
-    has changed: then nothing is changed) */
-export function toggleInText(text, task, done, C, base) {
+/** the whole text with one item ticked off (or not). → {text, line, raw (the line as it is now)}, or null if the item
+    can't be found for certain (the note has changed: then nothing is changed). If the line has moved, it is found
+    again only if there is no other line exactly like it. */
+export function toggleAt(text, task, done, C, base) {
   const lines = String(text).split('\n');
   let at = task.line;
   if (lines[at] !== task.raw) {
-    at = lines.indexOf(task.raw);
-    if (at < 0) return null;
+    const first = lines.indexOf(task.raw);
+    if (first < 0 || lines.indexOf(task.raw, first + 1) >= 0) return null;
+    at = first;
   }
   const now = parse(text, C, base).tasks.find((t) => t.line === at && t.list === task.list);
   if (!now) return null;
   const next = toggleLine(lines[at], now, done, C);
-  if (next === lines[at]) return done === now.done ? text : null;
+  if (next === lines[at]) return done === now.done ? { text, line: at, raw: next } : null;
   lines[at] = next;
-  return lines.join('\n');
+  return { text: lines.join('\n'), line: at, raw: next };
+}
+/** the same, → just the new text (or null) */
+export function toggleInText(text, task, done, C, base) {
+  const r = toggleAt(text, task, done, C, base);
+  return r ? r.text : null;
 }
 
 /** a new line for a list: "TO DO: book the room @2026-11-13" */

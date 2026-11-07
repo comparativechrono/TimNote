@@ -1,7 +1,7 @@
 /* TimNote's service worker: it keeps the app's files so that TimNote opens without the internet. It always asks
    the network first (so a new version is used at once), and falls back to the kept copy when offline. The notes
    themselves are never here: they are in your folder. Made by build/sw.mjs. */
-const VERSION = '1174880eca59';
+const VERSION = '9f1d90d2cf5a';
 const CACHE = 'timnote-' + VERSION;
 const ASSETS = [
   "./",

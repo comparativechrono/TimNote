@@ -38,7 +38,7 @@ const fsList = () => page.evaluate(async () => {
   await walk(await (await navigator.storage.getDirectory()).getDirectoryHandle('TimNote'), '');
   return out.sort();
 });
-const text = () => page.evaluate(() => window.TimNote.view.ed.getText());
+const text = () => page.waitForFunction(() => window.TimNote.view && window.TimNote.view.ed).then(() => page.evaluate(() => window.TimNote.view.ed.getText()));
 const saved = () => page.waitForFunction(() => document.querySelector('.note-status') && document.querySelector('.note-status').textContent === 'Saved', null, { timeout: 5000 });
 const today = await page.evaluate(() => new Date().toISOString().slice(0, 10));
 
@@ -81,7 +81,7 @@ try {
   await page.fill('.modal input[placeholder="Title"]', 'Shopping');
   await page.selectOption('.modal select:has(option[value="txt"])', 'txt');
   await page.getByRole('button', { name: 'Make the note' }).click();
-  await page.waitForSelector('.note-view .cm-content');
+  await page.waitForFunction(() => window.TimNote.view && /Shopping\.txt$/.test(window.TimNote.view.path || '') && !window.TimNote.view.needsLoad);
   await page.click('.cm-content');
   await page.keyboard.type('- [ ] milk\n- [ ] bread\nTODO: book the car service');
   await saved();
@@ -117,7 +117,7 @@ try {
   await shot('settings');
   await page.locator('#set-templates li', { hasText: 'Phone call' }).getByRole('button', { name: 'Change it' }).click();
   await page.waitForSelector('.note-view .cm-content');
-  await page.waitForFunction(() => window.TimNote.view.ed.getText().includes('{{title}}'));
+  await page.waitForFunction(() => window.TimNote.view && window.TimNote.view.ed && window.TimNote.view.ed.getText().includes('{{title}}'));
   ok(await page.locator('.note-title').evaluate((e) => e.readOnly), 'a template opens, its title fixed');
   await page.evaluate(() => {
     const ed = window.TimNote.view.ed;
@@ -188,8 +188,9 @@ try {
   console.log('Unsaved changes after a crash');
   await page.evaluate(async () => {
     const { idbSet } = await import('/js/idb.js');
+    const lib = await import('/js/library.js');
     const path = window.TimNote.view.path;
-    await idbSet('rec:' + path, { at: Date.now(), path, text: 'Typed but never saved.', base: 0, title: 'Shopping' });
+    await idbSet('rec:' + path, { at: Date.now(), path, text: 'Typed but never saved.', base: lib.get(path).mtime, title: 'Shopping', folder: 'Browser storage' });
   });
   await page.goto('http://localhost:8766/#/calendar/');
   await page.reload();
@@ -202,6 +203,69 @@ try {
   ok((await text()) === 'Typed but never saved.', 'they are offered back, and restored into the note');
   await saved();
 
+  console.log('Safety: changes from another computer are never lost');
+  const fsWrite = (p, data) => page.evaluate(async ([p, data]) => {
+    let d = await (await navigator.storage.getDirectory()).getDirectoryHandle('TimNote');
+    const parts = p.split('/');
+    const name = parts.pop();
+    for (const x of parts) d = await d.getDirectoryHandle(x, { create: true });
+    const w = await (await d.getFileHandle(name, { create: true })).createWritable();
+    await w.write(typeof data === 'string' ? data : new Uint8Array(data));
+    await w.close();
+  }, [p, data]);
+  const fsBytes = (p) => page.evaluate(async (p) => Array.from(new Uint8Array(await (await (await (await (await navigator.storage.getDirectory()).getDirectoryHandle('TimNote')).getFileHandle(p)).getFile()).arrayBuffer())), p);
+  await fsWrite(`${today} Safety.md`, 'First line.\n');
+  await page.evaluate(() => window.TimNote.rescan());
+  await page.evaluate((p) => window.TimNote.openNote(p), `${today} Safety.md`);
+  await page.waitForFunction(() => window.TimNote.view && window.TimNote.view.path && window.TimNote.view.path.includes('Safety'));
+  await page.click('.cm-content');
+  await page.evaluate(() => window.TimNote.view.ed.setCursor(0));
+  await page.keyboard.type('Mine. ');
+  await saved();
+  await fsWrite(`${today} Safety.md`, 'Mine. First line.\nWritten on the other computer.\n');
+  await page.evaluate(() => window.TimNote.view.checkDisk());
+  await page.waitForFunction(() => window.TimNote.view && window.TimNote.view.ed.getText().includes('other computer'));
+  await page.click('.cm-content');
+  await page.keyboard.press('Control+z');
+  await page.keyboard.press('Control+z');
+  await page.waitForTimeout(1300);
+  ok((await text()).includes('Written on the other computer.') && (await fsRead(`${today} Safety.md`)).includes('Written on the other computer.'), 'Ctrl+Z undoes only your own typing, not a change brought in from elsewhere');
+
+  await fsWrite(`${today} Safety.md`, 'Changed elsewhere, not yet seen here.\n');
+  await page.click('.note-title');
+  await page.fill('.note-title', 'Safety renamed');
+  await page.keyboard.press('Enter');
+  await page.waitForTimeout(1200);
+  const afterRename = await fsList();
+  ok(afterRename.includes(`${today} Safety.md`) && !afterRename.includes(`${today} Safety renamed.md`), 'a note changed elsewhere since it was last seen is not renamed');
+  ok((await text()).includes('Changed elsewhere, not yet seen here.') && (await fsRead(`${today} Safety.md`)).includes('Changed elsewhere'), 'and the change made elsewhere is shown, and kept');
+
+  console.log('Safety: a file that is not UTF-8 is never changed');
+  const ansi = [0x54, 0x4f, 0x20, 0x44, 0x4f, 0x3a, 0x20, 0x70, 0x61, 0x79, 0x20, 0x74, 0x68, 0x65, 0x20, 0x63, 0x61, 0x66, 0xe9, 0x20, 0xa3, 0x35, 0x0d, 0x0a]; // "TO DO: pay the café £5" (Windows-1252)
+  await fsWrite('ansi.txt', ansi);
+  await page.evaluate(() => window.TimNote.rescan());
+  await page.evaluate(() => window.TimNote.openNote('ansi.txt'));
+  await page.waitForFunction(() => window.TimNote.view && window.TimNote.view.path === 'ansi.txt');
+  await page.waitForSelector('.note-banner:has-text("isn’t UTF-8")');
+  ok((await text()).includes('pay the café £5') && (await page.locator('.cm-content').getAttribute('contenteditable')) === 'false', 'it is shown, read-only, with a warning');
+  await page.click('.sb-list[data-id="todo"]');
+  await page.waitForSelector('.item-text:has-text("café")');
+  await page.locator('.item', { hasText: 'café' }).locator('.item-box').check();
+  await page.waitForSelector('.toast:has-text("UTF-8")');
+  ok(JSON.stringify(await fsBytes('ansi.txt')) === JSON.stringify(ansi), 'ticking it off on the list is refused, and its bytes are unchanged');
+
+  console.log('Safety: two items ticked quickly in one note are both kept');
+  await fsWrite(`${today} Two items.md`, 'TO DO: first quick one\nTO DO: second quick one\n');
+  await page.evaluate(() => window.TimNote.rescan());
+  await page.waitForSelector('.item-text:has-text("second quick one")');
+  // (both clicked at once, so that the two changes to the file are under way together)
+  await page.evaluate(() => {
+    for (const li of document.querySelectorAll('.item')) if (/quick one/.test(li.textContent)) li.querySelector('.item-box').click();
+  });
+  await page.waitForTimeout(1200);
+  const two = await fsRead(`${today} Two items.md`);
+  ok(two === 'DONE: first quick one\nDONE: second quick one\n', 'both are ticked off in the file: ' + JSON.stringify(two));
+
   console.log('Spoken punctuation');
   const shaped = await page.evaluate(async () => (await import('/js/dictation.js')).shape('discussed the data full stop new paragraph action point book the room comma then lunch', ''));
   ok(shaped === 'Discussed the data.\n\nTO DO: Book the room, then lunch', 'dictation turns "full stop", "new paragraph" and "action point" into text: ' + JSON.stringify(shaped));
@@ -210,7 +274,7 @@ try {
   await page.setViewportSize({ width: 420, height: 820 });
   await page.waitForTimeout(300);
   await shot('narrow-note');
-  await page.click('.note-head .burger');
+  await page.locator('.burger:visible').first().click();
   await page.waitForTimeout(300);
   await shot('narrow-sidebar');
   ok(await page.evaluate(() => document.body.classList.contains('sidebar-open')), 'the sidebar opens from the menu button');

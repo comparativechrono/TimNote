@@ -81,6 +81,17 @@ export function resolvePath(fromDir, href) {
   return parts.join('/');
 }
 
+/** a file's bytes → its text, if it is UTF-8 (a byte-order mark kept, for decodeText to see). Anything else (an
+    "ANSI" file from Windows Notepad, say) is read as Windows-1252 to show, with utf8: false, so that it is never
+    written back, which would damage its accented letters and symbols. */
+export function decodeBytes(buf) {
+  try {
+    return { raw: new TextDecoder('utf-8', { fatal: true, ignoreBOM: true }).decode(buf), utf8: true };
+  } catch (e) {
+    return { raw: new TextDecoder('windows-1252').decode(buf), utf8: false };
+  }
+}
+
 /** text as it is kept in the editor (lines split by \n), and how to put it back as the file had it */
 export function decodeText(raw) {
   let text = String(raw);
